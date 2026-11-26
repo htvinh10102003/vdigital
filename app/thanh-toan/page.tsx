@@ -239,19 +239,23 @@ export default function CheckoutPage() {
     );
   }
 
-  // Đang chờ thanh toán PayOS thật
+  // Đang chờ thanh toán PayOS thật — qrImage là ảnh QR vẽ từ nội dung VietQR
+  // PayOS trả về; nếu không vẽ được thì chỉ hiện nút sang trang PayOS.
   if (state === "paying" && payInfo && !payInfo.demo) {
-    const qrSrc = payInfo.qrCode?.startsWith("data:") ? payInfo.qrCode : `data:image/png;base64,${payInfo.qrCode}`;
     return (
       <div className="max-w-lg mx-auto px-4 mt-8 text-center">
         <h1 className="text-2xl font-bold">Quét VietQR để thanh toán</h1>
         <p className="vd-muted mt-1">
           Đơn <b className="font-mono">{payInfo.orderCode}</b> — {formatVND(payInfo.amount)}
         </p>
-        <div className="mt-5 rounded-2xl bg-white p-4 inline-block">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={qrSrc} alt="VietQR thanh toán" className="w-64 h-64" />
-        </div>
+        {payInfo.qrImage ? (
+          <div className="mt-5 rounded-2xl bg-white p-4 inline-block">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={payInfo.qrImage} alt="VietQR thanh toán" className="w-64 h-64" />
+          </div>
+        ) : (
+          <p className="text-sm vd-muted mt-5">Không tải được mã QR — bấm nút dưới để sang trang thanh toán PayOS.</p>
+        )}
         <p className="text-sm vd-muted mt-3">Mở app ngân hàng, quét mã và chuyển khoản đúng số tiền. Hệ thống tự xác nhận trong vài giây.</p>
         <a href={payInfo.checkoutUrl} target="_blank" rel="noreferrer" className="inline-block mt-4 rounded-xl bg-brand-600 hover:bg-brand-700 px-5 py-2.5 font-semibold text-white">
           Mở trang thanh toán PayOS

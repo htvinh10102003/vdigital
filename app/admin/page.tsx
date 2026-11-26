@@ -810,6 +810,21 @@ export default function AdminPage() {
                   <p className="text-sm vd-muted">
                     Khách: {o.customer_name} · {o.customer_email} · {o.customer_phone || "—"} · Thanh toán: {o.payment_method === "manual-bank" ? "Chuyển khoản ngân hàng" : "VietQR (PayOS)"}
                   </p>
+                  {o.status === "pending" && o.payment_method !== "manual-bank" && (
+                    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm">
+                      <span className="text-amber-200">Đơn này chưa được PayOS báo về. Chỉ bấm khi đã thấy tiền về PayOS — bấm là giao hàng tự động ngay.</span>
+                      <ActionButton
+                        busy={busyKey === `confirm-paid:${o.id}`}
+                        onClick={() => {
+                          if (!confirm(`Xác nhận đơn ${o.code} (${formatVND(o.total)}) ĐÃ THANH TOÁN? Hệ thống sẽ giao hàng tự động ngay.`)) return;
+                          void adminAction("confirm-paid", o.code, o.id);
+                        }}
+                        className="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-4 py-2 font-semibold text-white disabled:opacity-50 disabled:cursor-wait"
+                      >
+                        {busyKey === `confirm-paid:${o.id}` ? "Đang xử lý…" : "Xác nhận đã thanh toán"}
+                      </ActionButton>
+                    </div>
+                  )}
                   {o.items.map((item) => {
                     const gf = gameForm[item.id] ?? { serial: "", pin: "", denomination: item.variant_name, note: "" };
                     const variant = catalog.products.flatMap((p) => p.variants).find((v) => v.id === item.variant_id);
