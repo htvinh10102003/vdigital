@@ -81,6 +81,10 @@ export interface Review {
   stars: number;
   content: string;
   created_at: string;
+  /** Đơn mà đánh giá này gắn vào (đánh giá theo đơn, v4.10). */
+  order_id?: string | null;
+  /** Xu đã thưởng cho đánh giá này (5 sao 200, dưới 5 sao 100, 0 = không thưởng). */
+  reward_xu?: number;
 }
 
 export interface Product {

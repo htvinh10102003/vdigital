@@ -16,6 +16,7 @@ export default async function CategoryPage({ params }: { params: { category: str
           : `Sản phẩm thuộc danh mục ${cat.name}.`
       }
       initialCategory={cat.slug}
+      catalog={catalog}
     />
   );
 }

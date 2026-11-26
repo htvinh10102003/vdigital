@@ -13,10 +13,14 @@ import { activeFlash } from "@/components/ProductCard";
 import { activeVariants, categoryPath, optionGroupLabel } from "@/lib/catalog-utils";
 import { ProductImage } from "@/components/ProductImage";
 import { Stars } from "@/components/Stars";
-import type { Review } from "@/lib/types";
+import type { Catalog, Product, Review } from "@/lib/types";
 
-export function ProductDetail({ slug }: { slug: string }) {
-  const { catalog } = useCatalog();
+export function ProductDetail({ slug, catalog: catalogProp }: { slug: string; catalog?: Catalog }) {
+  const ctx = useCatalog();
+  // Catalog lấy sẵn phía server (trang chi tiết đã fetch để kiểm tra slug)
+  // để HTML đầu tiên đã có sản phẩm — không truyền thì dùng context.
+  const catalog = catalogProp ?? ctx.catalog;
+  const loading = catalogProp ? false : ctx.loading;
   const cart = useCart();
   const toast = useToast();
   const auth = useAuth();
@@ -61,7 +65,11 @@ export function ProductDetail({ slug }: { slug: string }) {
   }, [product?.id]);
 
   if (!product) {
-    return <p className="max-w-7xl mx-auto px-4 mt-10 vd-muted">Đang tải sản phẩm…</p>;
+    return (
+      <p className="max-w-7xl mx-auto px-4 mt-10 vd-muted">
+        {loading ? "Đang tải sản phẩm…" : "Không tìm thấy sản phẩm này."}
+      </p>
+    );
   }
 
   const cat = catalog.categories.find((c) => c.id === product.category_id);

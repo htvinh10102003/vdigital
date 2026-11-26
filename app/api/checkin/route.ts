@@ -84,12 +84,12 @@ export async function POST(req: Request) {
     const sb = getSupabaseServer();
     if (!sb || !isSupabaseConfigured) return unauthorized();
     const today = todaySaigon();
-    const dates = await loadCheckinDates(user.id);
+    // Đọc lịch + mức thưởng SONG SONG (trước đây nối tiếp 2 lần gọi DB).
+    const [dates, amounts] = await Promise.all([loadCheckinDates(user.id), getCheckinAmounts()]);
     if (dates.has(today)) {
       return NextResponse.json({ already: true, streak: calcStreak(dates, today) });
     }
 
-    const amounts = await getCheckinAmounts();
     const amount = isSundaySaigon() ? amounts.sunday : amounts.daily;
     const name =
       (user.user_metadata?.full_name as string | undefined) ??
@@ -125,6 +125,8 @@ export async function POST(req: Request) {
       refCode: `CHECKIN-${today}`,
       note: "Điểm danh",
     });
+    // Thông báo vẫn chờ ghi xong (1 lần gọi DB): serverless có thể cắt
+    // ngang tác vụ chạy nền khi response đã trả về, nên không dám bỏ chờ.
     await createNotification({
       userId: user.id,
       email: user.email,
@@ -132,8 +134,10 @@ export async function POST(req: Request) {
       title: "Điểm danh thành công",
       body: `Bạn nhận được ${amount} Xu điểm danh ngày ${today}.`,
     });
-    const fresh = await loadCheckinDates(user.id);
-    return NextResponse.json({ ok: true, amount, streak: calcStreak(fresh, today), balance });
+    // Không đọc lại lịch nữa: vừa ghi thành công thì hôm nay chắc chắn đã
+    // có trong tập ngày — tính chuỗi luôn từ dữ liệu đã có (bớt 1 lần gọi DB).
+    const streak = calcStreak(new Set([...dates, today]), today);
+    return NextResponse.json({ ok: true, amount, streak, balance });
   } catch (err) {
     console.error("[checkin]", err);
     if (err instanceof Error && err.message === "PROFILE_NOT_FOUND") {

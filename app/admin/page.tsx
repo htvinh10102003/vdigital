@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { isSupabaseConfigured, useAuth, useCatalog, saveCatalogOverrides } from "@/components/providers";
+import { isSupabaseConfigured, useAuth, useCatalog, useConfirm, saveCatalogOverrides } from "@/components/providers";
 import { getSupabase } from "@/lib/supabase";
 import { formatDate, formatDateTime, formatSold, formatVND, isWithinWarranty, slugify } from "@/lib/format";
 import type { Banner, Category, Complaint, ComplaintStatus, Faq, ManualField, Order, Product, Variant } from "@/lib/types";
@@ -217,6 +217,7 @@ function StatCard({ label, value, sub, accent }: { label: string; value: string;
 
 export default function AdminPage() {
   const auth = useAuth();
+  const { confirm: confirmDialog } = useConfirm();
   const { catalog, refresh } = useCatalog();
   const [tab, setTab] = useState<Tab>("overview");
   const [orders, setOrders] = useState<Order[]>([]);
@@ -431,7 +432,15 @@ export default function AdminPage() {
   }
 
   async function deleteVoucher(v: AdminVoucher) {
-    if (!confirm(`Xoá voucher “${v.code}”? Không khôi phục được.`)) return;
+    if (
+      !(await confirmDialog({
+        title: "Xoá voucher",
+        message: `Xoá voucher “${v.code}”? Không khôi phục được.`,
+        confirmLabel: "Xoá voucher",
+        danger: true,
+      }))
+    )
+      return;
     setBusyKey(`del-voucher:${v.id}`);
     setMsg(null);
     try {
@@ -515,7 +524,14 @@ export default function AdminPage() {
       return;
     }
     const email = walletInfo?.profile?.email ?? walletSearch.trim();
-    if (!confirm(`${amount > 0 ? "Cộng" : "Trừ"} ${formatVND(Math.abs(amount))} Xu cho ${email}?${adjustNote.trim() ? `\nLý do: ${adjustNote.trim()}` : ""}`)) return;
+    if (
+      !(await confirmDialog({
+        title: "Chỉnh số dư Xu",
+        message: `${amount > 0 ? "Cộng" : "Trừ"} ${formatVND(Math.abs(amount))} Xu cho ${email}?${adjustNote.trim() ? `\nLý do: ${adjustNote.trim()}` : ""}`,
+        confirmLabel: amount > 0 ? "Cộng Xu" : "Trừ Xu",
+      }))
+    )
+      return;
     setBusyKey("adjust-wallet");
     setMsg(null);
     try {
@@ -715,7 +731,15 @@ export default function AdminPage() {
   // Server chặn khi còn đơn hàng (sản phẩm) hoặc còn sản phẩm (danh mục);
   // chặn thì hiện đúng lý do để ông xử lý, không xoá lén.
   async function deleteItem(kind: "product" | "category" | "banner" | "faq", id: string, label: string) {
-    if (!confirm(`Xoá hẳn “${label}”? Không khôi phục được.`)) return;
+    if (
+      !(await confirmDialog({
+        title: "Xoá hẳn",
+        message: `Xoá hẳn “${label}”? Không khôi phục được.`,
+        confirmLabel: "Xoá hẳn",
+        danger: true,
+      }))
+    )
+      return;
     setBusyKey(`del-${kind}:${id}`);
     setMsg(null);
     try {
@@ -817,7 +841,15 @@ export default function AdminPage() {
   }
 
   async function deleteStockCode(id: string, codeLabel: string) {
-    if (!confirm(`Xoá mã ${codeLabel} khỏi kho? Mã chưa dùng mới xoá được.`)) return;
+    if (
+      !(await confirmDialog({
+        title: "Xoá mã khỏi kho",
+        message: `Xoá mã ${codeLabel} khỏi kho? Mã chưa dùng mới xoá được.`,
+        confirmLabel: "Xoá mã",
+        danger: true,
+      }))
+    )
+      return;
     setBusyKey(`del-stock:${id}`);
     setMsg(null);
     try {
@@ -873,7 +905,14 @@ export default function AdminPage() {
   }
 
   async function resetTemplate() {
-    if (!confirm("Khôi phục mẫu này về mặc định của hệ thống?")) return;
+    if (
+      !(await confirmDialog({
+        title: "Khôi phục mẫu mặc định",
+        message: "Khôi phục mẫu này về mặc định của hệ thống?",
+        confirmLabel: "Khôi phục",
+      }))
+    )
+      return;
     setBusyKey("reset-template");
     setMsg(null);
     try {
@@ -1128,8 +1167,15 @@ export default function AdminPage() {
                       <span className="text-amber-200">Đơn này chưa được PayOS báo về. Chỉ bấm khi đã thấy tiền về PayOS — bấm là giao hàng tự động ngay.</span>
                       <ActionButton
                         busy={busyKey === `confirm-paid:${o.id}`}
-                        onClick={() => {
-                          if (!confirm(`Xác nhận đơn ${o.code} (${formatVND(o.total)}) ĐÃ THANH TOÁN? Hệ thống sẽ giao hàng tự động ngay.`)) return;
+                        onClick={async () => {
+                          if (
+                            !(await confirmDialog({
+                              title: "Xác nhận đã thanh toán",
+                              message: `Xác nhận đơn ${o.code} (${formatVND(o.total)}) ĐÃ THANH TOÁN? Hệ thống sẽ giao hàng tự động ngay.`,
+                              confirmLabel: "Xác nhận đã thanh toán",
+                            }))
+                          )
+                            return;
                           void adminAction("confirm-paid", o.code, o.id);
                         }}
                         className="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-4 py-2 font-semibold text-white disabled:opacity-50 disabled:cursor-wait"

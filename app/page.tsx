@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowRight, Gamepad2, Grid2x2, KeyRound, Play, ShieldCheck, Sparkles, Wrench, Zap } from "lucide-react";
 import { getCatalog } from "@/lib/store";
 import { partitionHome } from "@/lib/catalog-utils";
@@ -8,7 +9,12 @@ import { CartPanel, FollowCard, TrustCards } from "@/components/RightRail";
 import { FaqAccordion } from "@/components/FaqAccordion";
 
 /**
- * Trang chủ — server component: sản phẩm đã có sẵn trong HTML đầu tiên.
+ * Trang chủ — khung (hero, 3 bước, thanh toán) render ngay trong HTML đầu
+ * tiên; phần cần catalog (ô sản phẩm hero, danh mục, các lưới sản phẩm,
+ * FAQ) nằm sau Suspense nên stream về sau — byte đầu tiên không còn chờ
+ * đọc xong catalog, màn hình chờ #vd-boot chỉ hiện thoáng qua. Nhờ
+ * cache() trong lib/store.ts, các component con cùng gọi getCatalog cũng
+ * chỉ tốn 1 lượt đọc DB / request.
  * Bố cục theo ảnh mẫu Vinh gửi: hero trái + giỏ hàng phải, danh mục icon
  * tròn, lưới sản phẩm nổi bật. Mỗi sản phẩm chỉ xuất hiện đúng 1 lần
  * trên trang (partitionHome chia không trùng).
@@ -39,76 +45,63 @@ function Section({ title, href, icon, children }: { title: string; href: string;
   );
 }
 
-export default async function HomePage() {
+/** Các ô sản phẩm nổi trong hero — cần catalog nên stream riêng. */
+async function HeroTiles() {
   const catalog = await getCatalog();
-  const banners = catalog.banners.filter((b) => b.is_active);
-  const banner = banners[0];
-  const { flash, featured, best, newest, games, more } = partitionHome(catalog.products);
-  const topCats = catalog.categories.filter((c) => !c.parent_id);
   const heroTiles = catalog.products.filter((p) => p.is_active).slice(0, 4);
-
   return (
-    <div>
-      {/* Hero trái + giỏ hàng phải */}
-      <div className="grid gap-4 xl:grid-cols-[1fr_320px] items-start">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 min-h-[300px] md:min-h-[340px] p-7 md:p-10 text-white">
-          <div
-            className="absolute inset-0 opacity-25"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle at 85% 15%, rgba(255,255,255,0.5) 0, transparent 35%), radial-gradient(circle at 10% 90%, rgba(255,255,255,0.35) 0, transparent 30%)",
-            }}
-          />
-          <div className="relative">
-            <span className="inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold tracking-widest">
-              VDigital — TÀI KHOẢN SỐ GIÁ TỐT
-            </span>
-            <h1 className="mt-4 text-3xl leading-[1.15] md:text-5xl md:leading-[1.1] font-extrabold max-w-lg">
-              Nhanh chóng
-              <br />
-              An toàn — Tiện lợi
-            </h1>
-            <p className="mt-3 max-w-md text-white/85">
-              {banner?.subtitle ??
-                "Tài khoản bản quyền, thẻ game và công cụ AI — thanh toán VietQR tự động, giao hàng tức thì, bảo hành uy tín."}
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Link
-                href="/san-pham"
-                className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-6 py-3 font-bold text-slate-900 hover:bg-amber-300"
-              >
-                Khám phá ngay <ArrowRight size={17} />
-              </Link>
-              <Link
-                href="/the-game"
-                className="inline-flex items-center gap-2 rounded-xl bg-white/15 border border-white/30 px-6 py-3 font-bold hover:bg-white/25"
-              >
-                <Gamepad2 size={17} /> Thẻ game
-              </Link>
+    <div className="relative mt-8 flex gap-3">
+      {heroTiles.map((p) => (
+        <Link
+          key={p.id}
+          href={categoryPath(catalog.categories, p)}
+          aria-label={p.name}
+          className="flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-white/15 border border-white/25 backdrop-blur text-center transition hover:bg-white/25"
+        >
+          <span className="px-1 text-[11px] md:text-xs font-extrabold leading-tight">{p.initials}</span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function TilesSkeleton() {
+  return (
+    <div className="relative mt-8 flex gap-3" aria-label="Đang tải">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="h-16 w-16 md:h-20 md:w-20 animate-pulse rounded-2xl bg-white/15" />
+      ))}
+    </div>
+  );
+}
+
+function SectionsSkeleton() {
+  return (
+    <div className="mt-10 space-y-10" aria-label="Đang tải">
+      <div>
+        <div className="h-8 w-56 animate-pulse rounded-lg bg-white/5" />
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="vd-card animate-pulse p-4">
+              <div className="aspect-square rounded-xl bg-white/5" />
+              <div className="mt-3 h-4 rounded bg-white/5" />
+              <div className="mt-2 h-4 w-2/3 rounded bg-white/5" />
             </div>
-          </div>
-          {/* Minh họa: các ô sản phẩm nổi — tự vẽ, không dùng ảnh/nhân vật của hãng khác.
-              Mỗi ô link đúng trang chi tiết của sản phẩm đó. */}
-          <div className="relative mt-8 flex gap-3">
-            {heroTiles.map((p) => (
-              <Link
-                key={p.id}
-                href={categoryPath(catalog.categories, p)}
-                aria-label={p.name}
-                className="flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-white/15 border border-white/25 backdrop-blur text-center transition hover:bg-white/25"
-              >
-                <span className="px-1 text-[11px] md:text-xs font-extrabold leading-tight">{p.initials}</span>
-              </Link>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-4">
-          <CartPanel />
-          <TrustCards />
-          <FollowCard />
+          ))}
         </div>
       </div>
+    </div>
+  );
+}
 
+/** Danh mục + các lưới sản phẩm + FAQ — cần catalog nên stream riêng. */
+async function CatalogSections() {
+  const catalog = await getCatalog();
+  const { flash, featured, best, newest, games, more } = partitionHome(catalog.products);
+  const topCats = catalog.categories.filter((c) => !c.parent_id);
+
+  return (
+    <>
       {/* Danh mục phổ biến — icon tròn, danh mục thật của VDigital */}
       <section className="mt-10">
         <div className="flex items-end justify-between mb-4">
@@ -193,6 +186,72 @@ export default async function HomePage() {
         </Section>
       )}
 
+      {/* FAQ */}
+      <section className="mt-12">
+        <h2 className="font-display text-xl md:text-2xl font-extrabold tracking-tight mb-4">Câu hỏi thường gặp</h2>
+        <FaqAccordion faqs={catalog.faqs} />
+      </section>
+    </>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <div>
+      {/* Hero trái + giỏ hàng phải */}
+      <div className="grid gap-4 xl:grid-cols-[1fr_320px] items-start">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 min-h-[300px] md:min-h-[340px] p-7 md:p-10 text-white">
+          <div
+            className="absolute inset-0 opacity-25"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle at 85% 15%, rgba(255,255,255,0.5) 0, transparent 35%), radial-gradient(circle at 10% 90%, rgba(255,255,255,0.35) 0, transparent 30%)",
+            }}
+          />
+          <div className="relative">
+            <span className="inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold tracking-widest">
+              VDigital — TÀI KHOẢN SỐ GIÁ TỐT
+            </span>
+            <h1 className="mt-4 text-3xl leading-[1.15] md:text-5xl md:leading-[1.1] font-extrabold max-w-lg">
+              Nhanh chóng
+              <br />
+              An toàn — Tiện lợi
+            </h1>
+            <p className="mt-3 max-w-md text-white/85">
+              Tài khoản bản quyền, thẻ game và công cụ AI — thanh toán VietQR tự động, giao hàng tức thì, bảo hành uy tín.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link
+                href="/san-pham"
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-6 py-3 font-bold text-slate-900 hover:bg-amber-300"
+              >
+                Khám phá ngay <ArrowRight size={17} />
+              </Link>
+              <Link
+                href="/the-game"
+                className="inline-flex items-center gap-2 rounded-xl bg-white/15 border border-white/30 px-6 py-3 font-bold hover:bg-white/25"
+              >
+                <Gamepad2 size={17} /> Thẻ game
+              </Link>
+            </div>
+          </div>
+          {/* Minh họa: các ô sản phẩm nổi — tự vẽ, không dùng ảnh/nhân vật của hãng khác.
+              Mỗi ô link đúng trang chi tiết của sản phẩm đó. */}
+          <Suspense fallback={<TilesSkeleton />}>
+            <HeroTiles />
+          </Suspense>
+        </div>
+        <div className="space-y-4">
+          <CartPanel />
+          <TrustCards />
+          <FollowCard />
+        </div>
+      </div>
+
+      <Suspense fallback={<SectionsSkeleton />}>
+        <CatalogSections />
+      </Suspense>
+
       {/* 3 bước mua hàng */}
       <section className="mt-12">
         <h2 className="font-display text-xl md:text-2xl font-extrabold tracking-tight mb-4">Mua hàng số chỉ trong 3 bước</h2>
@@ -209,12 +268,6 @@ export default async function HomePage() {
             </div>
           ))}
         </div>
-      </section>
-
-      {/* FAQ */}
-      <section className="mt-12">
-        <h2 className="font-display text-xl md:text-2xl font-extrabold tracking-tight mb-4">Câu hỏi thường gặp</h2>
-        <FaqAccordion faqs={catalog.faqs} />
       </section>
 
       <section className="mt-12">

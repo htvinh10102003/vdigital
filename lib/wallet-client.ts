@@ -15,7 +15,7 @@ export async function getAccessToken(): Promise<string | null> {
 
 export interface WalletTransaction {
   id: string;
-  type: "topup" | "spend" | "checkin" | "admin_adjust" | "refund";
+  type: "topup" | "spend" | "checkin" | "admin_adjust" | "refund" | "review";
   amount: number;
   balance_after: number;
   ref_code: string | null;
@@ -34,6 +34,7 @@ export const WALLET_TX_LABELS: Record<WalletTransaction["type"], string> = {
   checkin: "Điểm danh",
   admin_adjust: "Admin chỉnh",
   refund: "Hoàn tiền",
+  review: "Thưởng đánh giá",
 };
 
 export interface PublicVoucher {

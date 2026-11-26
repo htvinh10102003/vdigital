@@ -19,7 +19,6 @@ import {
   ShoppingCart,
   Sun,
   User,
-  Wallet,
   X,
 } from "lucide-react";
 import { useAuth, useCart, useCatalog, useTheme } from "./providers";
@@ -27,6 +26,7 @@ import { maxDiscount } from "@/lib/catalog-utils";
 import { Logo } from "./Logo";
 import { AuthModal } from "./AuthModal";
 import { NotificationsBell } from "./NotificationsBell";
+import { ReviewNudge } from "./ReviewNudge";
 import { WalletChip } from "./WalletChip";
 
 const NAV = [
@@ -34,7 +34,7 @@ const NAV = [
   { href: "/san-pham", label: "Danh mục", icon: Grid2x2 },
   { href: "/tai-khoan?tab=orders", label: "Đơn hàng", icon: Package, exact: true },
   { href: "/tai-khoan/quan-ly", label: "Quản lý tài khoản", icon: User },
-  { href: "/thanh-toan", label: "Nạp tiền", icon: Wallet },
+  { href: "/gio-hang", label: "Giỏ hàng", icon: ShoppingCart },
   { href: "/huong-dan", label: "Hỗ trợ", icon: Headset },
   { href: "/dieu-khoan", label: "Về chúng tôi", icon: Info },
 ];
@@ -183,6 +183,7 @@ function BottomNav() {
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { catalog } = useCatalog();
+  const cart = useCart();
   const topCats = catalog.categories.filter((c) => !c.parent_id);
   // Khuyến mãi thật lớn nhất trong catalog (tính từ giá gốc/giá bán thật).
   // Không có giảm giá thì hiện text chung — không bịa "Giảm 20%".
@@ -211,6 +212,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             >
               <n.icon size={18} />
               {n.label}
+              {n.label === "Giỏ hàng" && cart.count > 0 && (
+                <span
+                  key={cart.count}
+                  className="cart-bump ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white"
+                >
+                  {cart.count}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -258,6 +267,29 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <p className="mt-4 px-1 text-[11px] vd-muted2">© {new Date().getFullYear()} VDigital</p>
       </div>
     </div>
+  );
+}
+
+/** Nút giỏ hàng nổi góc dưới phải trên desktop (mobile đã có BottomNav
+    kèm số đếm): luôn thấy, có hàng thì hiện số đếm đỏ. */
+function FloatingCart() {
+  const cart = useCart();
+  return (
+    <Link
+      href="/gio-hang"
+      aria-label={`Giỏ hàng, ${cart.count} sản phẩm`}
+      className="fixed bottom-5 right-5 z-40 hidden h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-xl shadow-brand-600/40 transition hover:bg-brand-500 lg:flex"
+    >
+      <ShoppingCart size={24} aria-hidden="true" />
+      {cart.count > 0 && (
+        <span
+          key={cart.count}
+          className="cart-bump absolute -top-1 -right-1 flex h-6 min-w-6 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white"
+        >
+          {cart.count}
+        </span>
+      )}
+    </Link>
   );
 }
 
@@ -385,6 +417,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Suspense fallback={null}>
         <BottomNav />
       </Suspense>
+      <FloatingCart />
+      <ReviewNudge />
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   );

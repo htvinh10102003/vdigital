@@ -7,7 +7,7 @@ import { getSupabaseServer, isSupabaseConfigured } from "./supabase";
  * số dư bằng cách đọc rồi cộng tay — tránh race khi 2 giao dịch cùng lúc.
  */
 
-export type WalletTxType = "topup" | "spend" | "checkin" | "admin_adjust" | "refund";
+export type WalletTxType = "topup" | "spend" | "checkin" | "admin_adjust" | "refund" | "review";
 
 export interface WalletTransaction {
   id: string;

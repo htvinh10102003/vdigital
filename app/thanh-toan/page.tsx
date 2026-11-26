@@ -380,7 +380,7 @@ export default function CheckoutPage() {
           <p className="text-sm vd-muted mt-4">
             Thông tin giao hàng cũng đã gửi về email <b>{order.customer_email}</b> (nếu mail đã cấu hình).
           </p>
-          <div className="flex gap-3 mt-5">
+          <div className="flex flex-wrap gap-3 mt-5">
             <button onClick={() => router.push("/tai-khoan?tab=orders")} className="rounded-xl bg-brand-600 hover:bg-brand-700 px-5 py-2.5 font-semibold text-white">
               Xem đơn hàng của tôi
             </button>
@@ -450,7 +450,7 @@ export default function CheckoutPage() {
         </p>
       ) : (
         <div className="mt-6 grid md:grid-cols-2 gap-6 items-start">
-          <div className="vd-card p-5 space-y-4">
+          <div className="vd-card p-5 space-y-4 min-w-0">
             <h2 className="font-bold">Thông tin nhận hàng</h2>
             <div>
               <label className="field-label" htmlFor="co-name">Họ tên *</label>
@@ -637,28 +637,28 @@ export default function CheckoutPage() {
             </button>
             <p className="text-xs vd-muted2 text-center">PayOS VietQR — miễn phí, 0% phí giao dịch, tự động duyệt đơn sau khi thanh toán.</p>
           </div>
-          <div className="vd-card p-5">
+          <div className="vd-card p-5 min-w-0">
             <h2 className="font-bold mb-3">Đơn hàng của bạn</h2>
             <div className="space-y-3">
               {lines.map(({ item, product, variant }) => {
                 const onSale = variant!.original_price > variant!.price;
                 const salePct = onSale ? Math.round((1 - variant!.price / variant!.original_price) * 100) : 0;
                 return (
-                  <div key={item.variantId} className="flex items-center gap-3">
+                  <div key={item.variantId} className="flex flex-wrap items-center gap-x-3 gap-y-2">
                     <ProductImage product={product!} className="h-12 w-12 rounded-xl shrink-0" textSize="text-base" />
-                    <span className="min-w-0 flex-1 text-sm">
+                    <span className="min-w-0 flex-1 basis-36 text-sm">
                       <span className="block truncate font-semibold">{product!.name} — {variant!.label}</span>
-                      <span className="vd-muted">
+                      <span className="vd-muted flex flex-wrap items-center gap-x-2">
                         {formatVND(variant!.price)}
                         {onSale && (
                           <>
-                            <span className="line-through ml-2">{formatVND(variant!.original_price)}</span>
-                            <span className="ml-2 rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-xs font-bold">-{salePct}%</span>
+                            <span className="line-through">{formatVND(variant!.original_price)}</span>
+                            <span className="rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-xs font-bold">-{salePct}%</span>
                           </>
                         )}
                       </span>
                     </span>
-                    <span className="flex items-center gap-1 shrink-0">
+                    <span className="flex items-center gap-1 shrink-0 ml-auto">
                       <button onClick={() => cart.setQty(item.variantId, item.qty - 1)} aria-label={`Giảm số lượng ${product!.name}`} className="flex h-8 w-8 items-center justify-center rounded-lg vd-surface2 border vd-border font-bold">−</button>
                       <span className="w-5 text-center text-sm font-semibold">{item.qty}</span>
                       <button onClick={() => cart.setQty(item.variantId, item.qty + 1)} aria-label={`Tăng số lượng ${product!.name}`} className="flex h-8 w-8 items-center justify-center rounded-lg vd-surface2 border vd-border font-bold">+</button>

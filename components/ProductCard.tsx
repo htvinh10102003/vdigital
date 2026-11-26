@@ -83,7 +83,7 @@ export function ProductCard({ product }: { product: Product }) {
         {/* Số liệu thật: sao trung bình + số lượt đánh giá từ bảng reviews,
             lượt mua đếm từ đơn đã thanh toán. Chưa có thì hiện trạng thái thật,
             không hiện số giả. */}
-        <div className="flex items-center gap-2 text-xs vd-muted">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs vd-muted">
           {product.review_count > 0 ? (
             <>
               <Stars value={product.rating} size={13} />
@@ -91,19 +91,19 @@ export function ProductCard({ product }: { product: Product }) {
               <span>({product.review_count})</span>
             </>
           ) : (
-            <span>Chưa có đánh giá</span>
+            <span className="whitespace-nowrap">Chưa có đánh giá</span>
           )}
           <span>·</span>
           {product.sold_count > 0 ? (
-            <span>Đã bán {formatSold(product.sold_count)}</span>
+            <span className="whitespace-nowrap">Đã bán {formatSold(product.sold_count)}</span>
           ) : (
-            <span className="font-semibold text-emerald-400">Mới mở bán</span>
+            <span className="font-semibold text-emerald-400 whitespace-nowrap">Mới mở bán</span>
           )}
         </div>
         {flash && <Countdown endsAt={flash.flash_ends_at} />}
         <div className="mt-auto pt-1">
           {cheapest && (
-            <div className="flex items-baseline gap-2">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <span className="font-display text-brand-400 font-extrabold text-lg leading-none">{formatVND(cheapest.price)}</span>
               {cheapest.original_price > cheapest.price && (
                 <span className="text-xs vd-muted2 line-through">{formatVND(cheapest.original_price)}</span>

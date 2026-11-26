@@ -10,7 +10,7 @@ import { ProductImage } from "./ProductImage";
 /** Panel giỏ hàng bên phải hero (theo bố cục ảnh mẫu). */
 export function CartPanel() {
   const cart = useCart();
-  const { catalog } = useCatalog();
+  const { catalog, loading } = useCatalog();
   const lines = cart.items
     .map((i) => {
       const product = catalog.products.find((p) => p.id === i.productId);
@@ -31,16 +31,23 @@ export function CartPanel() {
         <span className="text-sm vd-muted">{cart.count} sản phẩm</span>
       </div>
       {lines.length === 0 ? (
-        <div className="py-6 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-600/15 text-brand-400">
-            <ShoppingCart size={28} />
+        loading && cart.items.length > 0 ? (
+          <div className="py-6 text-center">
+            <p className="font-semibold">Đang tải giỏ hàng…</p>
+            <p className="text-sm vd-muted mt-1">Chờ một chút nhé.</p>
           </div>
-          <p className="mt-3 font-semibold">Giỏ hàng của bạn đang trống</p>
-          <p className="text-sm vd-muted mt-1">Hãy khám phá các sản phẩm bên dưới nhé!</p>
-          <Link href="/san-pham" className="btn-primary mt-4 w-full !py-2.5 text-sm">
-            Mua sắm ngay
-          </Link>
-        </div>
+        ) : (
+          <div className="py-6 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-600/15 text-brand-400">
+              <ShoppingCart size={28} />
+            </div>
+            <p className="mt-3 font-semibold">Giỏ hàng của bạn đang trống</p>
+            <p className="text-sm vd-muted mt-1">Hãy khám phá các sản phẩm bên dưới nhé!</p>
+            <Link href="/san-pham" className="btn-primary mt-4 w-full !py-2.5 text-sm">
+              Mua sắm ngay
+            </Link>
+          </div>
+        )
       ) : (
         <div className="mt-4 space-y-3">
           {lines.slice(0, 3).map(({ item, product, variant }) => (

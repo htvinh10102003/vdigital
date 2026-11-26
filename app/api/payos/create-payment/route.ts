@@ -177,17 +177,20 @@ export async function POST(req: Request) {
     });
     order.payment_link_id = payos.paymentLinkId;
     order.checkout_url = payos.checkoutUrl;
-    await updateOrder(order);
-    // PayOS trả qrCode là chuỗi nội dung VietQR (EMVCo), KHÔNG phải ảnh base64
-    // — trang thanh toán trước đây gắn nó vào data:image/png nên ảnh vỡ.
-    // Vẽ lại thành ảnh QR thật ở server để khách quét được ngay.
-    let qrImage: string | null = null;
-    try {
-      const QRCode = (await import("qrcode")).default;
-      qrImage = await QRCode.toDataURL(payos.qrCode, { margin: 1, width: 512 });
-    } catch {
-      qrImage = null;
-    }
+    // Lưu thông tin PayOS + vẽ QR SONG SONG (trước đây nối tiếp 2 bước).
+    // Lưu đơn hỏng cũng không chặn trả QR: khách vẫn quét được, webhook
+    // tra cứu đơn theo mã đơn nên vẫn khớp.
+    const [, qrImage] = await Promise.all([
+      updateOrder(order).catch(() => undefined),
+      (async (): Promise<string | null> => {
+        try {
+          const QRCode = (await import("qrcode")).default;
+          return await QRCode.toDataURL(payos.qrCode, { margin: 1, width: 512 });
+        } catch {
+          return null;
+        }
+      })(),
+    ]);
     return NextResponse.json({
       demo: false,
       orderCode: order.code,

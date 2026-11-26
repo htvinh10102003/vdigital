@@ -21,6 +21,13 @@ export const EMPTY_STATS: ProductStats = {
   starDist: [0, 0, 0, 0, 0],
 };
 
+// Cache số liệu trong bộ nhớ server 60 giây: lượt mua/sao không cần chính
+// xác từng giây, nhưng mỗi lần tính lại tốn 2-3 lần gọi DB nối tiếp (đọc
+// orders đã trả + reviews) — đây là phần làm /api/catalog + trang chủ chậm.
+// Mỗi instance serverless cache riêng, vẫn đúng sau tối đa 60s.
+const STATS_TTL_MS = 60_000;
+let statsCache: { at: number; data: Record<string, ProductStats> } | null = null;
+
 function emptyStatsMap(): Record<string, ProductStats> {
   return {};
 }
@@ -28,6 +35,7 @@ function emptyStatsMap(): Record<string, ProductStats> {
 export async function getProductStats(
   sb: SupabaseClient,
 ): Promise<Record<string, ProductStats>> {
+  if (statsCache && Date.now() - statsCache.at < STATS_TTL_MS) return statsCache.data;
   const out: Record<string, ProductStats> = emptyStatsMap();
   const ensure = (id: string): ProductStats => {
     if (!out[id]) out[id] = { sold: 0, rating: 0, reviewCount: 0, starDist: [0, 0, 0, 0, 0] };
@@ -80,6 +88,7 @@ export async function getProductStats(
   } catch (err) {
     console.error("[stats] Không tính được số liệu thật:", err);
   }
+  statsCache = { at: Date.now(), data: out };
   return out;
 }
 

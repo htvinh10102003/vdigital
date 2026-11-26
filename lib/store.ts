@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import { cache } from "react";
 import { DEMO_STOCK, SEED_CATALOG, findVariant } from "./seed";
 import { getSupabaseServer, isSupabaseConfigured, requireServiceRoleForWrite } from "./supabase";
 import { getProductStats } from "./stats";
@@ -20,7 +21,11 @@ import type { Catalog, Order, OrderItem, Product, StockCode, Variant } from "./t
 
 // ---------------- Catalog ----------------
 
-export async function getCatalog(): Promise<Catalog> {
+// cache() của React: nhiều server component cùng gọi trong 1 request (vd
+// trang chủ có HeroTiles + CatalogSections) chỉ tốn 1 lượt đọc DB. Mỗi
+// request mới tính lại — không cache xuyên request (số liệu vẫn tươi nhờ
+// cache 60s trong lib/stats.ts).
+export const getCatalog = cache(async (): Promise<Catalog> => {
   const sb = getSupabaseServer();
   if (!sb || !isSupabaseConfigured) return zeroStatsCatalog(SEED_CATALOG);
   try {
@@ -64,7 +69,7 @@ export async function getCatalog(): Promise<Catalog> {
     console.error("[store] Lỗi đọc Supabase, dùng seed:", err);
     return zeroStatsCatalog(SEED_CATALOG);
   }
-}
+});
 
 /** Demo / chưa có Supabase: số liệu về 0, KHÔNG hiện số seed giả. */
 function zeroStatsCatalog(base: Catalog): Catalog {

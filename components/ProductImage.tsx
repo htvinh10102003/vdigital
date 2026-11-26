@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import Image from "next/image";
 import type { Product } from "@/lib/types";
 
@@ -11,11 +14,13 @@ interface Props {
 /**
  * Ảnh sản phẩm: dùng next/image khi admin đã up ảnh (image_url),
  * chưa có ảnh thì fallback ô màu + chữ viết tắt — không dùng
- * logo/ảnh của hãng khác.
+ * logo/ảnh của hãng khác. Ảnh lỗi (link hỏng) cũng về ô chữ
+ * thay vì hiện biểu tượng ảnh vỡ + chữ alt tràn ra ngoài.
  */
 export function ProductImage({ product, className = "", textSize = "text-2xl", priority }: Props) {
+  const [imgError, setImgError] = useState(false);
   const label = product.initials;
-  if (product.image_url) {
+  if (product.image_url && !imgError) {
     return (
       <div className={`relative overflow-hidden bg-gradient-to-br ${product.gradient} ${className}`}>
         <Image
@@ -26,6 +31,7 @@ export function ProductImage({ product, className = "", textSize = "text-2xl", p
           className="object-cover"
           priority={priority}
           loading={priority ? undefined : "lazy"}
+          onError={() => setImgError(true)}
         />
       </div>
     );
@@ -41,7 +47,11 @@ export function ProductImage({ product, className = "", textSize = "text-2xl", p
       />
       <div className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-white">
         <span className={`font-extrabold leading-none drop-shadow ${textSize}`}>{label}</span>
-        <span className="text-[11px] font-semibold text-white/90 line-clamp-2 leading-tight">{product.name}</span>
+        {/* Ô nhỏ (giỏ/thanh toán: text-base/text-xl) chỉ hiện chữ viết tắt,
+            tên đầy đủ sẽ bị cắt vì ô chỉ 48px — tên đã hiện kế bên rồi. */}
+        {textSize !== "text-base" && textSize !== "text-xl" && (
+          <span className="text-[11px] font-semibold text-white/90 line-clamp-2 leading-tight">{product.name}</span>
+        )}
       </div>
     </div>
   );

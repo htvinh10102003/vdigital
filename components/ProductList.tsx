@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useCatalog } from "@/components/providers";
 import { ProductCard } from "@/components/ProductCard";
 import { formatVND } from "@/lib/format";
-import type { Product } from "@/lib/types";
+import type { Catalog, Product } from "@/lib/types";
 import { maxDiscount, minPrice } from "@/lib/catalog-utils";
 
 export type SortKey = "newest" | "best" | "price-asc" | "price-desc" | "discount" | "rating";
@@ -27,6 +27,7 @@ export function ProductList({
   initialCategory = "",
   initialSort = "newest",
   onlyFlash = false,
+  catalog: catalogProp,
 }: {
   title: string;
   description?: string;
@@ -34,8 +35,15 @@ export function ProductList({
   initialCategory?: string;
   initialSort?: SortKey;
   onlyFlash?: boolean;
+  // Catalog lấy sẵn phía server (trang /san-pham, danh mục...) để HTML đầu
+  // tiên đã có sản phẩm — không truyền thì dùng context (client tải sau).
+  // Lưu ý: có prop thì admin refresh() không cập nhật lại trang này cho
+  // tới khi tải lại trang.
+  catalog?: Catalog;
 }) {
-  const { catalog } = useCatalog();
+  const ctx = useCatalog();
+  const catalog = catalogProp ?? ctx.catalog;
+  const loading = catalogProp ? false : ctx.loading;
   const [q, setQ] = useState(initialQuery);
   const [cat, setCat] = useState(initialCategory);
   const [sort, setSort] = useState<SortKey>(initialSort);
@@ -106,7 +114,7 @@ export function ProductList({
     <div>
       <h1 className="font-display text-2xl font-extrabold tracking-tight">{title}</h1>
       {description && <p className="text-sm vd-muted mt-1">{description}</p>}
-      <p className="text-sm vd-muted mt-2">{filtered.length} sản phẩm</p>
+      <p className="text-sm vd-muted mt-2">{loading ? "Đang tải sản phẩm…" : `${filtered.length} sản phẩm`}</p>
 
       <button
         onClick={() => setFiltersOpen((v) => !v)}
@@ -238,7 +246,17 @@ export function ProductList({
               ))}
             </select>
           </div>
-          {pageItems.length === 0 ? (
+          {loading && pageItems.length === 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4" aria-label="Đang tải sản phẩm">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="vd-card animate-pulse p-4">
+                  <div className="aspect-square rounded-xl bg-white/5" />
+                  <div className="mt-3 h-4 rounded bg-white/5" />
+                  <div className="mt-2 h-4 w-2/3 rounded bg-white/5" />
+                </div>
+              ))}
+            </div>
+          ) : pageItems.length === 0 ? (
             <p className="vd-muted py-10 text-center">Không tìm thấy sản phẩm nào phù hợp.</p>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">

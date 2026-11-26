@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AlertTriangle, X } from "lucide-react";
 import { SEED_CATALOG } from "@/lib/seed";
 import { getSupabase, isSupabaseConfigured, resolveAdminEmails } from "@/lib/supabase";
 import type { CartItem, Catalog, Product } from "@/lib/types";
@@ -16,6 +17,10 @@ interface CatalogCtx {
 const CatalogContext = createContext<CatalogCtx>({ catalog: SEED_CATALOG, loading: false, refresh: async () => {} });
 
 const OVERRIDE_KEY = "vdigital-overrides-v2";
+
+// Catalog rỗng lúc chưa tải xong (tránh hiện số liệu seed giả trong lúc
+// chờ /api/catalog — xem Providers).
+const EMPTY_CATALOG: Catalog = { categories: [], products: [], banners: [], faqs: [] };
 
 function applyOverrides(base: Catalog): Catalog {
   try {
@@ -129,6 +134,140 @@ function ToastHost({ toast }: { toast: { id: number; message: string } | null })
   );
 }
 
+// ---------------- Confirm (popup xác nhận chuyên nghiệp, thay cho
+// confirm() của trình duyệt — hộp thoại trình duyệt trông rẻ tiền, không
+// khớp giao diện shop, không tùy được nút/tone) ----------------
+
+export interface ConfirmOptions {
+  title?: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+}
+
+interface ConfirmCtx {
+  confirm: (opts: ConfirmOptions) => Promise<boolean>;
+}
+
+const ConfirmContext = createContext<ConfirmCtx>({ confirm: async () => false });
+
+export function useConfirm() {
+  return useContext(ConfirmContext);
+}
+
+function ConfirmHost({
+  req,
+  onDone,
+}: {
+  req: { opts: ConfirmOptions; resolve: (v: boolean) => void } | null;
+  onDone: (v: boolean) => void;
+}) {
+  // Chỉ đóng bằng nút Hủy / X / phím Esc — không đóng khi bấm ra vùng tối
+  // xung quanh (quy ước modal của shop: tránh bấm nhầm mất thao tác).
+  useEffect(() => {
+    if (!req) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDone(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [req, onDone]);
+  if (!req) return null;
+  const { opts } = req;
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={opts.title ?? "Xác nhận"}
+    >
+      <div className="w-full max-w-md vd-card p-6 shadow-lift">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span
+              className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+                opts.danger ? "bg-red-500/15 text-red-400" : "bg-amber-500/15 text-amber-300"
+              }`}
+            >
+              <AlertTriangle size={18} aria-hidden="true" />
+            </span>
+            <div>
+              <h3 className="font-bold text-lg leading-snug">{opts.title ?? "Xác nhận"}</h3>
+              <p className="mt-1 text-sm vd-muted whitespace-pre-line">{opts.message}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onDone(false)}
+            aria-label="Đóng"
+            className="rounded-lg p-1.5 vd-muted hover:bg-white/10"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => onDone(false)}
+            className="rounded-lg border vd-border px-4 py-2 font-semibold hover:bg-white/5"
+          >
+            {opts.cancelLabel ?? "Hủy"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onDone(true)}
+            className={`rounded-lg px-4 py-2 font-semibold text-white ${
+              opts.danger ? "bg-red-600 hover:bg-red-500" : "bg-emerald-600 hover:bg-emerald-500"
+            }`}
+          >
+            {opts.confirmLabel ?? "Xác nhận"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- BootSplash (điều khiển màn hình chờ #vd-boot trong
+// layout) ----------------
+
+/**
+ * Màn hình chờ mở đầu kiểu AWSAMELIE: div #vd-boot đã có sẵn trong HTML
+ * đầu tiên nên vẽ ngay, không chờ JS. Component này chỉ đổi dòng chữ theo
+ * giai đoạn (Kiểm tra đăng nhập → Đang tải sản phẩm) rồi làm mờ + gỡ đi
+ * khi đăng nhập xong và catalog đã tải. Lưới an toàn 10s: kẹt mạng hay lỗi
+ * gì thì vẫn gỡ, không bao giờ kẹt khách ở màn hình chờ.
+ */
+function BootSplash() {
+  const { loading: authLoading } = useAuth();
+  const { loading: catalogLoading } = useCatalog();
+  useEffect(() => {
+    const node = document.getElementById("vd-boot");
+    if (!node) return;
+    const text = document.getElementById("vd-boot-text");
+    if (text) {
+      text.textContent = authLoading
+        ? "Kiểm tra đăng nhập…"
+        : catalogLoading
+          ? "Đang tải sản phẩm…"
+          : "Mở shop…";
+    }
+    if (!authLoading && !catalogLoading) {
+      node.style.transition = "opacity 350ms ease";
+      node.style.opacity = "0";
+      const t = setTimeout(() => node.remove(), 400);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [authLoading, catalogLoading]);
+  useEffect(() => {
+    const t = setTimeout(() => document.getElementById("vd-boot")?.remove(), 10_000);
+    return () => clearTimeout(t);
+  }, []);
+  return null;
+}
+
 // ---------------- Cart ----------------
 
 interface CartCtx {
@@ -191,16 +330,30 @@ function toAuthUser(u: { email?: string; user_metadata?: Record<string, unknown>
 // ---------------- Providers ----------------
 
 export function Providers({ children, initialCatalog }: { children: ReactNode; initialCatalog?: Catalog }) {
-  // Catalog đã render phía server (layout fetch getCatalog) nên trang mở ra
-  // là thấy sản phẩm ngay, không còn "Đang tải sản phẩm…" 10–15s.
+  // Catalog KHÔNG còn lấy ở server trong layout (đó là thứ làm byte đầu
+  // tiên chậm 2-3s) — client tải sau khi mount. Lúc chưa có thì dùng catalog
+  // rỗng + cờ loading để các trang hiện skeleton, không hiện số seed giả.
   const [catalog, setCatalog] = useState<Catalog>(() =>
-    initialCatalog ? applyOverrides(initialCatalog) : SEED_CATALOG,
+    initialCatalog ? applyOverrides(initialCatalog) : EMPTY_CATALOG,
   );
-  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(!initialCatalog);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const [confirmReq, setConfirmReq] = useState<{ opts: ConfirmOptions; resolve: (v: boolean) => void } | null>(null);
+
+  const confirm = useCallback(
+    (opts: ConfirmOptions) => new Promise<boolean>((resolve) => setConfirmReq({ opts, resolve })),
+    [],
+  );
+  const closeConfirm = useCallback(
+    (v: boolean) => {
+      if (confirmReq) confirmReq.resolve(v);
+      setConfirmReq(null);
+    },
+    [confirmReq],
+  );
 
   // Toast tự ẩn sau 2.5s; mỗi lần notify mới là 1 id mới (kể cả trùng nội dung).
   const notify = useCallback((message: string) => {
@@ -225,6 +378,14 @@ export function Providers({ children, initialCatalog }: { children: ReactNode; i
       setCatalogLoading(false);
     }
   }, []);
+
+  // Không có catalog từ server thì tải ngay sau khi mount (trang đã hiện
+  // nhờ splash, data điền sau — song song với server render trang chủ).
+  useEffect(() => {
+    if (initialCatalog) return;
+    setCatalogLoading(true);
+    void refreshCatalog();
+  }, [initialCatalog, refreshCatalog]);
 
   useEffect(() => {
     try {
@@ -365,8 +526,12 @@ export function Providers({ children, initialCatalog }: { children: ReactNode; i
     <CatalogContext.Provider value={{ catalog, loading: catalogLoading, refresh: refreshCatalog }}>
       <AuthContext.Provider value={auth}>
         <CartContext.Provider value={cart}>
-          <ToastContext.Provider value={{ notify }}>{children}</ToastContext.Provider>
-          <ToastHost toast={toast} />
+          <ConfirmContext.Provider value={{ confirm }}>
+            <ToastContext.Provider value={{ notify }}>{children}</ToastContext.Provider>
+            <ToastHost toast={toast} />
+            <ConfirmHost req={confirmReq} onDone={closeConfirm} />
+            <BootSplash />
+          </ConfirmContext.Provider>
         </CartContext.Provider>
       </AuthContext.Provider>
     </CatalogContext.Provider>

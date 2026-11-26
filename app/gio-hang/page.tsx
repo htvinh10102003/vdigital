@@ -44,33 +44,33 @@ export default function CartPage() {
       <p className="text-sm vd-muted mt-1">{cart.count} sản phẩm</p>
       <div className="mt-4 space-y-3">
         {lines.map(({ item, product, variant }) => (
-          <div key={item.variantId} className="flex items-center gap-3 sm:gap-4 vd-card p-3">
-            <ProductImage product={product!} className="w-16 h-16 rounded-xl shrink-0" textSize="text-xl" />
-            <div className="flex-1 min-w-0">
+          <div key={item.variantId} className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-x-4 vd-card p-3">
+            <ProductImage product={product!} className="h-12 w-12 sm:h-16 sm:w-16 rounded-xl shrink-0" textSize="text-xl" />
+            <div className="min-w-0 flex-1 basis-36 sm:basis-0">
               <Link href={categoryPath(catalog.categories, product!)} className="font-semibold hover:text-brand-400 truncate block">
                 {product!.name} — {variant!.label}
               </Link>
-              <div className="text-sm vd-muted">
+              <div className="text-sm vd-muted flex flex-wrap items-center gap-x-2">
                 {formatVND(variant!.price)}
                 {variant!.original_price > variant!.price && (
                   <>
-                    <span className="line-through ml-2">{formatVND(variant!.original_price)}</span>
-                    <span className="ml-2 rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-xs font-bold">
+                    <span className="line-through">{formatVND(variant!.original_price)}</span>
+                    <span className="rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-xs font-bold">
                       -{Math.round((1 - variant!.price / variant!.original_price) * 100)}%
                     </span>
                   </>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button onClick={() => cart.setQty(item.variantId, item.qty - 1)} aria-label={`Giảm số lượng ${product!.name}`} className="flex h-11 w-11 items-center justify-center rounded-lg vd-surface2 border vd-border text-lg font-bold">−</button>
+            <div className="flex items-center gap-1.5 shrink-0 ml-auto sm:ml-0">
+              <button onClick={() => cart.setQty(item.variantId, item.qty - 1)} aria-label={`Giảm số lượng ${product!.name}`} className="flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-lg vd-surface2 border vd-border text-lg font-bold">−</button>
               <span className="w-6 text-center font-semibold" aria-label={`Số lượng: ${item.qty}`}>{item.qty}</span>
-              <button onClick={() => cart.setQty(item.variantId, item.qty + 1)} aria-label={`Tăng số lượng ${product!.name}`} className="flex h-11 w-11 items-center justify-center rounded-lg vd-surface2 border vd-border text-lg font-bold">+</button>
+              <button onClick={() => cart.setQty(item.variantId, item.qty + 1)} aria-label={`Tăng số lượng ${product!.name}`} className="flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-lg vd-surface2 border vd-border text-lg font-bold">+</button>
             </div>
-            <div className="font-bold text-brand-400 w-24 text-right hidden sm:block">
+            <div className="font-bold text-brand-400 w-20 sm:w-24 text-right">
               {formatVND(variant!.price * item.qty)}
             </div>
-            <button onClick={() => cart.remove(item.variantId)} className="flex h-11 w-11 shrink-0 items-center justify-center vd-muted hover:text-red-400" aria-label={`Xoá ${product!.name} khỏi giỏ`}>
+            <button onClick={() => cart.remove(item.variantId)} className="flex h-9 w-9 sm:h-11 sm:w-11 shrink-0 items-center justify-center vd-muted hover:text-red-400" aria-label={`Xoá ${product!.name} khỏi giỏ`}>
               <Trash2 size={18} />
             </button>
           </div>

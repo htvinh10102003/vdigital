@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CalendarCheck, Check, Clock, Coins, Copy, Loader2, MessageSquareWarning, Wallet } from "lucide-react";
+import { CalendarCheck, Check, Clock, Coins, Copy, Loader2, MessageSquareWarning, Star, Wallet } from "lucide-react";
 import { isSupabaseConfigured, useAuth, useToast } from "@/components/providers";
+import { Stars } from "@/components/Stars";
 import { formatDate, formatDateTime, formatVND, isWithinWarranty } from "@/lib/format";
 import { getAccessToken, WALLET_TX_LABELS, type WalletTransaction } from "@/lib/wallet-client";
-import { COMPLAINT_REASONS, COMPLAINT_REASON_LABELS, COMPLAINT_STATUS_LABELS, type Complaint, type ComplaintReason, type Order } from "@/lib/types";
+import { COMPLAINT_REASONS, COMPLAINT_REASON_LABELS, COMPLAINT_STATUS_LABELS, type Complaint, type ComplaintReason, type Order, type OrderItem, type Review } from "@/lib/types";
 
 const TOPUP_QUICK = [50_000, 100_000, 200_000, 500_000];
 
@@ -43,6 +44,71 @@ export default function AccountPage() {
   const [checkin, setCheckin] = useState<CheckinStatus | null>(null);
   const [checkinBusy, setCheckinBusy] = useState(false);
   const [checkinMsg, setCheckinMsg] = useState("");
+
+  // --- Đánh giá theo đơn (v4.10) — chỉ tài khoản thật ---
+  const [myReviews, setMyReviews] = useState<Record<string, Review>>({});
+  const [reviewItemId, setReviewItemId] = useState<string | null>(null);
+  const [reviewStars, setReviewStars] = useState(5);
+  const [reviewText, setReviewText] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewMsg, setReviewMsg] = useState("");
+
+  const loadMyReviews = useCallback(async () => {
+    const token = await getAccessToken();
+    if (!token) return;
+    try {
+      const res = await fetch("/api/reviews/mine", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { reviews?: Review[] };
+      const map: Record<string, Review> = {};
+      for (const r of data.reviews ?? []) map[r.product_id] = r;
+      setMyReviews(map);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  async function submitReview(item: OrderItem, order: Order) {
+    if (!reviewText.trim()) {
+      setReviewMsg("Hãy viết vài dòng đánh giá.");
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) return;
+    setReviewBusy(true);
+    setReviewMsg("");
+    try {
+      const res = await fetch("/api/reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ productId: item.product_id, stars: reviewStars, content: reviewText.trim(), orderId: order.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Không gửi được đánh giá");
+      if (data.review) setMyReviews((prev) => ({ ...prev, [item.product_id]: data.review as Review }));
+      if (typeof data.balance === "number") setWalletBalance(data.balance);
+      if (typeof data.reward === "number" && data.reward > 0) {
+        toast.notify(`Đã gửi đánh giá — nhận ${formatVND(data.reward)} Xu`);
+        try {
+          window.dispatchEvent(new Event("vdigital:wallet-updated"));
+        } catch {
+          /* ignore */
+        }
+      } else {
+        toast.notify("Đã gửi đánh giá của bạn");
+      }
+      setReviewItemId(null);
+      setReviewText("");
+      setReviewStars(5);
+      await loadWallet();
+    } catch (e) {
+      setReviewMsg(e instanceof Error ? e.message : "Không gửi được đánh giá");
+    } finally {
+      setReviewBusy(false);
+    }
+  }
 
   // --- Khiếu nại bảo hành (v4.8) — chỉ tài khoản thật ---
   const [complaints, setComplaints] = useState<Complaint[]>([]);
@@ -107,7 +173,8 @@ export default function AccountPage() {
     loadWallet();
     loadCheckin();
     loadComplaints();
-  }, [hasRealSession, loadWallet, loadCheckin, loadComplaints]);
+    loadMyReviews();
+  }, [hasRealSession, loadWallet, loadCheckin, loadComplaints, loadMyReviews]);
 
   // Dừng poll nạp tiền khi rời trang.
   useEffect(
@@ -197,6 +264,14 @@ export default function AccountPage() {
     if (!token) return;
     setCheckinBusy(true);
     setCheckinMsg("");
+    // Hiện kết quả NGAY khi bấm (optimistic): nút đổi thành "Đã điểm danh",
+    // chuỗi +1, khỏi chờ server trả về mới thấy gì. Server xác nhận sau;
+    // nếu lỗi thì tải lại trạng thái thật để hoàn tác.
+    const optimistic = checkin && !checkin.checked_in_today;
+    if (optimistic) {
+      setCheckin({ ...checkin, checked_in_today: true, streak: checkin.streak + 1 });
+      setCheckinMsg("Đang cộng Xu…");
+    }
     try {
       const res = await fetch("/api/checkin", {
         method: "POST",
@@ -207,11 +282,13 @@ export default function AccountPage() {
       if (!res.ok) throw new Error(data.error || "Điểm danh thất bại");
       if (data.already) {
         setCheckinMsg("Hôm nay bạn đã điểm danh rồi.");
+        await loadCheckin();
       } else {
         setCheckinMsg(`Điểm danh thành công — nhận ${formatVND(Number(data.amount ?? 0))} Xu, chuỗi ${data.streak ?? 0} ngày.`);
         if (typeof data.balance === "number") setWalletBalance(data.balance);
       }
-      await loadCheckin();
+      // Chỉ tải lại ví (lịch sử giao dịch); trạng thái điểm danh server đã
+      // trả về đầy đủ nên không gọi lại /api/checkin nữa.
       await loadWallet();
       try {
         window.dispatchEvent(new Event("vdigital:wallet-updated"));
@@ -219,6 +296,7 @@ export default function AccountPage() {
         /* ignore */
       }
     } catch (e) {
+      if (optimistic) await loadCheckin();
       setCheckinMsg(e instanceof Error ? e.message : "Lỗi điểm danh");
     } finally {
       setCheckinBusy(false);
@@ -337,7 +415,7 @@ export default function AccountPage() {
       {hasRealSession && (
         <div className="grid md:grid-cols-2 gap-4 mt-5 items-start">
           {/* Ví Xu */}
-          <div className="vd-card p-5">
+          <div className="vd-card p-5 min-w-0">
             <h2 className="font-bold flex items-center gap-2">
               <Wallet size={18} aria-hidden="true" className="text-amber-300" /> Ví Xu
             </h2>
@@ -425,7 +503,7 @@ export default function AccountPage() {
           </div>
 
           {/* Điểm danh */}
-          <div className="vd-card p-5">
+          <div className="vd-card p-5 min-w-0">
             <h2 className="font-bold flex items-center gap-2">
               <CalendarCheck size={18} aria-hidden="true" className="text-emerald-400" /> Điểm danh nhận Xu
             </h2>
@@ -552,6 +630,79 @@ export default function AccountPage() {
                             <span className="text-xs font-semibold text-amber-300">
                               Đã có khiếu nại {COMPLAINT_STATUS_LABELS[openComplaint.status]} — xem tiến trình bên dưới.
                             </span>
+                          )}
+                        </div>
+                      )}
+                      {/* Đánh giá theo đơn (v4.10) — món đã giao mới đánh giá được. */}
+                      {item.status === "delivered" && hasRealSession && item.product_id && (
+                        <div className="mt-2">
+                          {myReviews[item.product_id] ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Stars value={myReviews[item.product_id].stars} />
+                              <span className="text-xs font-semibold text-emerald-300">
+                                Đã đánh giá
+                                {(myReviews[item.product_id].reward_xu ?? 0) > 0 &&
+                                  ` · +${formatVND(myReviews[item.product_id].reward_xu ?? 0)} Xu`}
+                              </span>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReviewItemId(reviewItemId === item.id ? null : item.id);
+                                  setReviewMsg("");
+                                  setReviewStars(5);
+                                }}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/50 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-300 hover:bg-violet-500/20"
+                              >
+                                <Star size={14} aria-hidden="true" /> Đánh giá nhận Xu
+                              </button>
+                              {reviewItemId === item.id && (
+                                <div className="mt-2 rounded-xl border vd-border p-3 space-y-2">
+                                  <div className="flex items-center gap-1" role="radiogroup" aria-label="Chọn số sao">
+                                    {[1, 2, 3, 4, 5].map((n) => (
+                                      <button
+                                        key={n}
+                                        type="button"
+                                        onClick={() => setReviewStars(n)}
+                                        aria-label={`${n} sao`}
+                                        aria-checked={reviewStars === n}
+                                        role="radio"
+                                        className="p-0.5"
+                                      >
+                                        <Star
+                                          size={22}
+                                          className={n <= reviewStars ? "text-amber-400" : "text-slate-600"}
+                                          fill="currentColor"
+                                        />
+                                      </button>
+                                    ))}
+                                    <span className="ml-1 text-xs vd-muted">
+                                      {reviewStars === 5 ? "5 sao nhận 200 Xu" : "Nhận 100 Xu"}
+                                    </span>
+                                  </div>
+                                  <textarea
+                                    value={reviewText}
+                                    onChange={(e) => setReviewText(e.target.value)}
+                                    rows={3}
+                                    placeholder="Chia sẻ trải nghiệm của bạn về sản phẩm này…"
+                                    className="field"
+                                  />
+                                  {reviewMsg && (
+                                    <p role="alert" className="text-sm font-semibold text-red-400">{reviewMsg}</p>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => void submitReview(item, o)}
+                                    disabled={reviewBusy}
+                                    className="btn-primary !py-2 text-sm disabled:opacity-50"
+                                  >
+                                    {reviewBusy ? "Đang gửi…" : "Gửi đánh giá"}
+                                  </button>
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       )}

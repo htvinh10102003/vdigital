@@ -3,7 +3,6 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/AppShell";
-import { getCatalog } from "@/lib/store";
 
 /**
  * Typography — một họ phông duy nhất (Inter) cho cả tiêu đề lẫn nội dung.
@@ -33,14 +32,30 @@ export const viewport = {
 
 export const revalidate = 60;
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Catalog lấy phía server: trang chủ render sản phẩm ngay trong HTML đầu
-  // tiên, không còn "Đang tải sản phẩm…" 10–15s như bản cũ.
-  const catalog = await getCatalog();
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // Màn hình chờ kiểu AWSAMELIE: HTML đầu tiên đã có splash (logo + xoay
+  // tròn + "Kiểm tra đăng nhập…") nên mở shop là thấy ngay, không còn trắng
+  // trang 2-3 giây. Catalog KHÔNG lấy ở server nữa (đó chính là thứ làm
+  // byte đầu tiên chậm) — client tải sau khi mount (Providers), còn nội
+  // dung trang chủ vẫn render phía server như trước.
   return (
     <html lang="vi" suppressHydrationWarning>
       <body className={inter.variable}>
-        <Providers initialCatalog={catalog}>
+        <div
+          id="vd-boot"
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-[#0a0f1e] text-white"
+        >
+          <img src="/favicon.svg" alt="VDigital" className="h-16 w-16" />
+          <div
+            className="h-10 w-10 animate-spin rounded-full border-[3px] border-white/15 border-t-violet-500"
+            aria-hidden="true"
+          />
+          <p id="vd-boot-text" className="text-sm font-semibold text-white/85">
+            Kiểm tra đăng nhập…
+          </p>
+          <p className="text-xs text-white/40">VDigital — Tài khoản số giá tốt</p>
+        </div>
+        <Providers>
           <AppShell>{children}</AppShell>
         </Providers>
       </body>

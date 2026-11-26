@@ -6,5 +6,5 @@ export default async function ProductPage({ params }: { params: { category: stri
   const catalog = await getCatalog();
   const product = catalog.products.find((p) => p.slug === params.slug);
   if (!product) notFound();
-  return <ProductDetail slug={product.slug} />;
+  return <ProductDetail slug={product.slug} catalog={catalog} />;
 }
