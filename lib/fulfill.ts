@@ -3,6 +3,8 @@ import { findVariant } from "./seed";
 import { findVariantInCatalog, getCatalog } from "./store";
 import { getOrderByCode, takeStockCode, updateOrder } from "./store";
 import { getSupabaseServer } from "./supabase";
+import { notifyOrderDelivered, notifyOrderPaid } from "./notifications";
+import { recordVoucherUsage } from "./vouchers";
 import type { Order } from "./types";
 
 /**
@@ -67,6 +69,21 @@ export async function fulfillPaidOrder(order: Order): Promise<Order> {
 
   order.status = orderStatusAfter(order);
   await updateOrder(order);
+
+  // Voucher chỉ ghi nhận đã dùng khi đơn ĐÃ TRẢ TIỀN (tới được đây).
+  if (order.voucher_code) {
+    await recordVoucherUsage({
+      voucherCode: order.voucher_code,
+      userId: order.user_id,
+      customerEmail: order.customer_email,
+      orderCode: order.code,
+    });
+  }
+
+  // Thông báo cho khách (best-effort, không làm hỏng giao hàng nếu lỗi):
+  // trả tiền xong luôn báo 1 cái; giao hết thì báo thêm 1 cái "đã giao".
+  await notifyOrderPaid(order);
+  if (order.status === "completed") await notifyOrderDelivered(order);
 
   // Gửi mail giao hàng cho phần đã giao tự động (nếu có). Phần làm tay sẽ
   // gửi mail riêng khi admin hoàn thành. Mẫu mail lấy từ bảng

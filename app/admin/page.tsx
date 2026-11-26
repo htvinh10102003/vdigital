@@ -30,7 +30,7 @@ async function adminHeaders(): Promise<Record<string, string>> {
   return h;
 }
 
-type Tab = "overview" | "orders" | "products" | "stock" | "reports" | "content" | "emails" | "settings";
+type Tab = "overview" | "orders" | "products" | "stock" | "reports" | "content" | "emails" | "settings" | "vouchers" | "wallet";
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   pending: "Chờ thanh toán",
@@ -136,6 +136,53 @@ interface SavedTemplate {
   is_default: boolean;
 }
 
+// --- Voucher / Ví Xu (v4.7) ---
+interface AdminVoucher {
+  id: string;
+  code: string;
+  type: "percent" | "fixed";
+  value: number;
+  min_order: number;
+  max_uses: number | null;
+  target_emails: string[] | null;
+  is_active: boolean;
+  expires_at: string | null;
+  created_at: string;
+  used_count: number;
+}
+
+interface AdminWalletTx {
+  id: string;
+  type: string;
+  amount: number;
+  balance_after: number;
+  ref_code: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+interface AdminWalletInfo {
+  found: boolean;
+  balance: number;
+  profile: { email: string; name?: string | null; created_at?: string | null } | null;
+  transactions: AdminWalletTx[];
+  checkin: { daily_amount: number; sunday_amount: number } | null;
+  orders_exist: boolean;
+}
+
+function emptyVoucherForm(): Omit<AdminVoucher, "id" | "created_at" | "used_count"> {
+  return {
+    code: "",
+    type: "percent",
+    value: 10,
+    min_order: 0,
+    max_uses: null,
+    target_emails: null,
+    is_active: true,
+    expires_at: null,
+  };
+}
+
 type Msg = { tone: "ok" | "err" | "info"; text: string } | null;
 
 /** Nút thao tác có trạng thái loading: bấm thì disable + spinner, xong báo kết quả. */
@@ -220,6 +267,25 @@ export default function AdminPage() {
   const [tplBody, setTplBody] = useState(DEFAULT_TEMPLATES.auto.body);
   const [tplShowPreview, setTplShowPreview] = useState(false);
 
+  // Voucher (v4.7)
+  const [vouchers, setVouchers] = useState<AdminVoucher[]>([]);
+  const [vouchersLoading, setVouchersLoading] = useState(false);
+  const [voucherForm, setVoucherForm] = useState<Omit<AdminVoucher, "id" | "created_at" | "used_count"> | null>(null);
+  const [voucherEditId, setVoucherEditId] = useState<string | null>(null);
+  const [voucherTargetText, setVoucherTargetText] = useState("");
+
+  // Ví Xu (v4.7)
+  const [walletSearch, setWalletSearch] = useState("");
+  const [walletInfo, setWalletInfo] = useState<AdminWalletInfo | null>(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [adjustNote, setAdjustNote] = useState("");
+  const [checkinDaily, setCheckinDaily] = useState("");
+  const [checkinSunday, setCheckinSunday] = useState("");
+
+  // Ẩn/hiện giá trị mật khẩu trong chi tiết đơn (key `${itemId}:${fieldId}`).
+  const [revealedInfo, setRevealedInfo] = useState<Set<string>>(new Set());
+
   async function loadOrders() {
     setLoading(true);
     try {
@@ -259,6 +325,202 @@ export default function AdminPage() {
     if (res.ok) setTemplates((await res.json()).templates ?? []);
   }
 
+  // --- Voucher / Ví Xu (v4.7) ---
+  async function loadVouchers() {
+    setVouchersLoading(true);
+    try {
+      const res = await fetch("/api/admin/vouchers", { headers: await adminHeaders() });
+      if (res.ok) setVouchers(((await res.json()).vouchers ?? []) as AdminVoucher[]);
+      else setMsg({ tone: "err", text: "Không tải được danh sách voucher" });
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi tải voucher" });
+    } finally {
+      setVouchersLoading(false);
+    }
+  }
+
+  async function saveVoucher() {
+    if (!voucherForm) return;
+    if (!voucherForm.code.trim()) {
+      setMsg({ tone: "err", text: "Nhập mã voucher." });
+      return;
+    }
+    if (voucherForm.value <= 0) {
+      setMsg({ tone: "err", text: "Giá trị giảm phải lớn hơn 0." });
+      return;
+    }
+    if (voucherForm.type === "percent" && voucherForm.value > 100) {
+      setMsg({ tone: "err", text: "Giảm % tối đa 100%." });
+      return;
+    }
+    const targetEmails = voucherTargetText.split("\n").map((e) => e.trim()).filter(Boolean);
+    const payload = {
+      ...voucherForm,
+      code: voucherForm.code.trim().toUpperCase(),
+      target_emails: targetEmails.length > 0 ? targetEmails : null,
+    };
+    setBusyKey("save-voucher");
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/vouchers", {
+        method: voucherEditId ? "PATCH" : "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify(voucherEditId ? { id: voucherEditId, ...payload } : payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Lưu voucher thất bại." });
+        return;
+      }
+      setMsg({ tone: "ok", text: voucherEditId ? "Đã cập nhật voucher." : "Đã tạo voucher." });
+      setVoucherForm(null);
+      setVoucherEditId(null);
+      await loadVouchers();
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function deleteVoucher(v: AdminVoucher) {
+    if (!confirm(`Xoá voucher “${v.code}”? Không khôi phục được.`)) return;
+    setBusyKey(`del-voucher:${v.id}`);
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/admin/vouchers?id=${encodeURIComponent(v.id)}`, {
+        method: "DELETE",
+        headers: await adminHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Xoá voucher thất bại." });
+        return;
+      }
+      setMsg({ tone: "ok", text: `Đã xoá voucher “${v.code}”.` });
+      await loadVouchers();
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function toggleVoucher(v: AdminVoucher) {
+    setBusyKey(`toggle-voucher:${v.id}`);
+    try {
+      const res = await fetch("/api/admin/vouchers", {
+        method: "PATCH",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ id: v.id, is_active: !v.is_active }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Đổi trạng thái thất bại." });
+        return;
+      }
+      await loadVouchers();
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function lookupWallet(email?: string) {
+    const e = (email ?? walletSearch).trim();
+    if (!e.includes("@")) {
+      setMsg({ tone: "err", text: "Nhập email hợp lệ để tra ví." });
+      return;
+    }
+    setWalletLoading(true);
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/admin/wallet?email=${encodeURIComponent(e)}`, {
+        headers: await adminHeaders(),
+      });
+      const data = (await res.json()) as AdminWalletInfo;
+      if (!res.ok) {
+        setMsg({ tone: "err", text: (data as unknown as { error?: string }).error || "Không tra được ví." });
+        return;
+      }
+      setWalletInfo(data);
+      if (data.checkin) {
+        setCheckinDaily(String(data.checkin.daily_amount));
+        setCheckinSunday(String(data.checkin.sunday_amount));
+      }
+      if (!data.found) setMsg({ tone: "info", text: `Chưa có tài khoản/ví cho ${e} — vẫn chỉnh được số dư, hệ thống sẽ tạo ví khi lưu.` });
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setWalletLoading(false);
+    }
+  }
+
+  async function adjustWallet() {
+    if (!walletInfo?.profile?.email && !walletSearch.trim().includes("@")) {
+      setMsg({ tone: "err", text: "Tra ví theo email trước rồi mới chỉnh số dư." });
+      return;
+    }
+    const amount = Number(adjustAmount);
+    if (!amount || !Number.isInteger(amount)) {
+      setMsg({ tone: "err", text: "Nhập số Xu cần cộng/trừ (số nguyên, khác 0 — vd 50000 hoặc -20000)." });
+      return;
+    }
+    const email = walletInfo?.profile?.email ?? walletSearch.trim();
+    if (!confirm(`${amount > 0 ? "Cộng" : "Trừ"} ${formatVND(Math.abs(amount))} Xu cho ${email}?${adjustNote.trim() ? `\nLý do: ${adjustNote.trim()}` : ""}`)) return;
+    setBusyKey("adjust-wallet");
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/wallet", {
+        method: "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ action: "adjust", email, amount, note: adjustNote.trim() || "Admin chỉnh tay" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Chỉnh số dư thất bại." });
+        return;
+      }
+      setMsg({ tone: "ok", text: `Đã chỉnh số dư ${email}.` });
+      setAdjustAmount("");
+      setAdjustNote("");
+      await lookupWallet(email);
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function saveCheckinSettings() {
+    const daily = Number(checkinDaily);
+    const sunday = Number(checkinSunday);
+    if (!Number.isInteger(daily) || daily < 0 || !Number.isInteger(sunday) || sunday < 0) {
+      setMsg({ tone: "err", text: "Số Xu điểm danh phải là số nguyên ≥ 0." });
+      return;
+    }
+    setBusyKey("save-checkin");
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/wallet", {
+        method: "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ action: "settings", daily, sunday }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Lưu cài đặt điểm danh thất bại." });
+        return;
+      }
+      setMsg({ tone: "ok", text: "Đã lưu mức Xu điểm danh." });
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   useEffect(() => {
     if (auth.isAdmin) {
       loadOrders();
@@ -269,6 +531,12 @@ export default function AdminPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.isAdmin]);
+
+  // Voucher chỉ tải khi mở tab — tránh gọi API chưa có khi không cần.
+  useEffect(() => {
+    if (auth.isAdmin && tab === "vouchers") loadVouchers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.isAdmin, tab]);
 
   // Số liệu thật cho Tổng quan: doanh thu chỉ tính đơn đã trả tiền trở đi.
   const stats = useMemo(() => {
@@ -666,6 +934,8 @@ export default function AdminPage() {
             { key: "reports", label: "Báo cáo" },
             { key: "content", label: "Danh mục · Banner · FAQ" },
             { key: "emails", label: "Mẫu email" },
+            { key: "vouchers", label: "Voucher" },
+            { key: "wallet", label: "Ví Xu" },
             { key: "settings", label: "Cài đặt" },
           ] as { key: Tab; label: string }[]
         ).map((t) => (
@@ -817,6 +1087,7 @@ export default function AdminPage() {
                     const gf = gameForm[item.id] ?? { serial: "", pin: "", denomination: item.variant_name, note: "" };
                     const variant = catalog.products.flatMap((p) => p.variants).find((v) => v.id === item.variant_id);
                     const fieldLabel = new Map((variant?.manual_fields ?? []).map((f) => [f.id, f.label]));
+                    const fieldType = new Map((variant?.manual_fields ?? []).map((f) => [f.id, f.type]));
                     return (
                       <div key={item.id} className="vd-card-flat p-3 text-sm">
                         <div className="flex flex-wrap justify-between gap-2">
@@ -832,11 +1103,56 @@ export default function AdminPage() {
                             <p className="font-semibold text-xs uppercase tracking-wide vd-muted">Thông tin khách đã cung cấp (xử lý tay)</p>
                             {Object.entries(item.customer_info)
                               .filter(([, v]) => String(v ?? "").trim())
-                              .map(([k, v]) => (
-                                <p key={k} className="mt-1">
-                                  {fieldLabel.get(k) ?? k}: <b>{String(v)}</b>
-                                </p>
-                              ))}
+                              .map(([k, v]) => {
+                                const isPw = fieldType.get(k) === "password";
+                                const revealKey = `${item.id}:${k}`;
+                                const revealed = revealedInfo.has(revealKey);
+                                return (
+                                  <p key={k} className="mt-1">
+                                    {fieldLabel.get(k) ?? k}:{" "}
+                                    {isPw && !revealed ? (
+                                      <>
+                                        <b>••••••</b>{" "}
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setRevealedInfo((prev) => {
+                                              const next = new Set(prev);
+                                              next.add(revealKey);
+                                              return next;
+                                            })
+                                          }
+                                          className="text-xs font-semibold text-brand-400 hover:underline"
+                                        >
+                                          Hiện
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <b>{String(v)}</b>
+                                        {isPw && (
+                                          <>
+                                            {" "}
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setRevealedInfo((prev) => {
+                                                  const next = new Set(prev);
+                                                  next.delete(revealKey);
+                                                  return next;
+                                                })
+                                              }
+                                              className="text-xs font-semibold text-brand-400 hover:underline"
+                                            >
+                                              Ẩn
+                                            </button>
+                                          </>
+                                        )}
+                                      </>
+                                    )}
+                                  </p>
+                                );
+                              })}
                           </div>
                         )}
 
@@ -1179,6 +1495,7 @@ export default function AdminPage() {
                                 <option value="email">Email</option>
                                 <option value="number">Số</option>
                                 <option value="textarea">Đoạn dài</option>
+                                <option value="password">Mật khẩu</option>
                               </select>
                             </label>
                             <label className="flex items-center gap-2 text-sm pb-2.5">
@@ -1708,6 +2025,306 @@ export default function AdminPage() {
                 ))}
               </ul>
             )}
+          </div>
+        </div>
+      )}
+
+      {tab === "vouchers" && (
+        <div className="mt-5 space-y-5">
+          <div className="vd-card p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-display font-bold">Danh sách voucher</h3>
+              <div className="flex gap-2">
+                <ActionButton busy={vouchersLoading} onClick={loadVouchers} className="btn-outline !py-2 text-sm">
+                  {vouchersLoading ? "Đang tải…" : "Tải lại"}
+                </ActionButton>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVoucherForm(emptyVoucherForm());
+                    setVoucherEditId(null);
+                    setVoucherTargetText("");
+                  }}
+                  className="btn-primary !py-2 text-sm"
+                >
+                  + Tạo voucher
+                </button>
+              </div>
+            </div>
+            {vouchers.length === 0 && !vouchersLoading ? (
+              <p className="text-sm vd-muted mt-3">Chưa có voucher nào — bấm “Tạo voucher” để tạo mã giảm giá đầu tiên.</p>
+            ) : (
+              <div className="overflow-x-auto mt-3">
+                <table className="w-full text-sm text-left">
+                  <thead>
+                    <tr className="border-b vd-border vd-muted">
+                      <th className="py-2 pr-3 font-semibold">Mã</th>
+                      <th className="py-2 pr-3 font-semibold">Giảm</th>
+                      <th className="py-2 pr-3 font-semibold">Đơn tối thiểu</th>
+                      <th className="py-2 pr-3 font-semibold">Lượt dùng</th>
+                      <th className="py-2 pr-3 font-semibold">Tặng riêng</th>
+                      <th className="py-2 pr-3 font-semibold">Hết hạn</th>
+                      <th className="py-2 pr-3 font-semibold">Trạng thái</th>
+                      <th className="py-2 font-semibold" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vouchers.map((v) => (
+                      <tr key={v.id} className="border-b vd-border last:border-b-0">
+                        <td className="py-2 pr-3 font-mono font-bold">{v.code}</td>
+                        <td className="py-2 pr-3">{v.type === "percent" ? `${v.value}%` : formatVND(v.value)}</td>
+                        <td className="py-2 pr-3">{v.min_order > 0 ? formatVND(v.min_order) : "—"}</td>
+                        <td className="py-2 pr-3">
+                          {v.used_count} / {v.max_uses ?? "∞"}
+                        </td>
+                        <td className="py-2 pr-3 text-xs">
+                          {v.target_emails?.length ? (
+                            <span title={v.target_emails.join("\n")}>
+                              {v.target_emails.length} email
+                            </span>
+                          ) : (
+                            "Công khai"
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-xs">{v.expires_at ? formatDateTime(v.expires_at) : "—"}</td>
+                        <td className="py-2 pr-3">
+                          <button
+                            onClick={() => void toggleVoucher(v)}
+                            disabled={busyKey === `toggle-voucher:${v.id}`}
+                            className={`rounded-full px-2.5 py-1 text-xs font-bold disabled:opacity-50 ${v.is_active ? "bg-emerald-500/15 text-emerald-300" : "vd-surface2 vd-muted"}`}
+                            title="Bấm để bật/tắt"
+                          >
+                            {v.is_active ? "Đang bật" : "Đã tắt"}
+                          </button>
+                        </td>
+                        <td className="py-2 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVoucherForm({
+                                code: v.code,
+                                type: v.type,
+                                value: v.value,
+                                min_order: v.min_order,
+                                max_uses: v.max_uses,
+                                target_emails: v.target_emails,
+                                is_active: v.is_active,
+                                expires_at: v.expires_at,
+                              });
+                              setVoucherEditId(v.id);
+                              setVoucherTargetText((v.target_emails ?? []).join("\n"));
+                            }}
+                            className="text-sm font-semibold text-brand-400 hover:underline mr-3"
+                          >
+                            Sửa
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deleteVoucher(v)}
+                            disabled={busyKey === `del-voucher:${v.id}`}
+                            className="text-sm text-red-400 hover:underline disabled:opacity-50"
+                          >
+                            Xoá
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {voucherForm && (
+            <div className="vd-card p-4 space-y-3">
+              <h3 className="font-display font-bold">{voucherEditId ? `Sửa voucher ${voucherForm.code}` : "Tạo voucher mới"}</h3>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="field-label">Mã voucher *</span>
+                  <input
+                    value={voucherForm.code}
+                    onChange={(e) => setVoucherForm({ ...voucherForm, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "") })}
+                    className="field font-mono"
+                    placeholder="vd: GIAM10"
+                  />
+                </label>
+                <label className="block">
+                  <span className="field-label">Loại giảm</span>
+                  <select value={voucherForm.type} onChange={(e) => setVoucherForm({ ...voucherForm, type: e.target.value as "percent" | "fixed" })} className="field">
+                    <option value="percent">Giảm theo %</option>
+                    <option value="fixed">Giảm số tiền cố định</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="field-label">{voucherForm.type === "percent" ? "Phần trăm giảm (%) *" : "Số tiền giảm (đ) *"}</span>
+                  <input type="number" min={0} value={voucherForm.value} onChange={(e) => setVoucherForm({ ...voucherForm, value: Number(e.target.value) })} className="field" />
+                </label>
+                <label className="block">
+                  <span className="field-label">Đơn tối thiểu (đ, 0 = không giới hạn)</span>
+                  <input type="number" min={0} value={voucherForm.min_order} onChange={(e) => setVoucherForm({ ...voucherForm, min_order: Number(e.target.value) })} className="field" />
+                </label>
+                <label className="block">
+                  <span className="field-label">Tổng lượt dùng tối đa (trống = không giới hạn)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={voucherForm.max_uses ?? ""}
+                    onChange={(e) => setVoucherForm({ ...voucherForm, max_uses: e.target.value === "" ? null : Number(e.target.value) })}
+                    className="field"
+                    placeholder="Không giới hạn"
+                  />
+                </label>
+                <label className="block">
+                  <span className="field-label">Hết hạn lúc (trống = không hết hạn)</span>
+                  <input
+                    type="datetime-local"
+                    value={voucherForm.expires_at ? voucherForm.expires_at.slice(0, 16) : ""}
+                    onChange={(e) => setVoucherForm({ ...voucherForm, expires_at: e.target.value ? new Date(e.target.value).toISOString() : null })}
+                    className="field"
+                  />
+                </label>
+              </div>
+              <label className="block">
+                <span className="field-label">Tặng riêng cho email (mỗi dòng 1 email — để trống là voucher công khai)</span>
+                <textarea rows={3} value={voucherTargetText} onChange={(e) => setVoucherTargetText(e.target.value)} className="field" placeholder={"khach1@gmail.com\nkhach2@gmail.com"} />
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={voucherForm.is_active} onChange={(e) => setVoucherForm({ ...voucherForm, is_active: e.target.checked })} className="accent-violet-600" />
+                Voucher đang bật
+              </label>
+              <p className="text-xs vd-muted">Mỗi tài khoản chỉ dùng 1 lần cho mỗi mã. Mã tặng riêng chỉ tài khoản có email trong danh sách mới áp được.</p>
+              <div className="flex gap-2">
+                <ActionButton busy={busyKey === "save-voucher"} onClick={saveVoucher}>
+                  {busyKey === "save-voucher" ? "Đang lưu…" : voucherEditId ? "Lưu thay đổi" : "Tạo voucher"}
+                </ActionButton>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVoucherForm(null);
+                    setVoucherEditId(null);
+                  }}
+                  className="btn-outline !py-2.5 text-sm"
+                >
+                  Huỷ
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "wallet" && (
+        <div className="mt-5 space-y-5">
+          <div className="vd-card p-4">
+            <h3 className="font-display font-bold">Tra ví khách theo email</h3>
+            <div className="flex gap-2 mt-3 max-w-xl">
+              <input
+                value={walletSearch}
+                onChange={(e) => setWalletSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void lookupWallet()}
+                placeholder="Nhập email khách (vd khach@gmail.com)"
+                type="email"
+                className="field flex-1"
+                aria-label="Email khách"
+              />
+              <ActionButton busy={walletLoading} onClick={() => void lookupWallet()} className="btn-primary !py-2.5 text-sm">
+                {walletLoading ? "Đang tra…" : "Tra ví"}
+              </ActionButton>
+            </div>
+            {walletInfo && (
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="flex flex-wrap gap-x-6 gap-y-1">
+                  <p>
+                    <b>{walletInfo.profile?.name ?? walletInfo.profile?.email ?? walletSearch}</b>
+                    {walletInfo.profile?.email && <span className="vd-muted"> · {walletInfo.profile.email}</span>}
+                  </p>
+                  <p>
+                    Số dư: <b className="text-amber-300 text-base">{formatVND(walletInfo.balance)} Xu</b>
+                  </p>
+                  <p className="vd-muted">
+                    {walletInfo.orders_exist ? "Đã có đơn hàng" : "Chưa có đơn hàng"}
+                    {walletInfo.profile?.created_at ? ` · Tham gia ${formatDateTime(walletInfo.profile.created_at)}` : ""}
+                  </p>
+                </div>
+                {walletInfo.transactions.length === 0 ? (
+                  <p className="vd-muted">Chưa có giao dịch nào.</p>
+                ) : (
+                  <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                    <table className="w-full text-left">
+                      <thead className="sticky top-0" style={{ background: "var(--surface)" }}>
+                        <tr className="border-b vd-border vd-muted">
+                          <th className="py-2 pr-3 font-semibold">Loại</th>
+                          <th className="py-2 pr-3 font-semibold">Số tiền</th>
+                          <th className="py-2 pr-3 font-semibold">Số dư sau</th>
+                          <th className="py-2 pr-3 font-semibold">Mã / Ghi chú</th>
+                          <th className="py-2 font-semibold">Thời gian</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {walletInfo.transactions.map((t) => (
+                          <tr key={t.id} className="border-b vd-border last:border-b-0">
+                            <td className="py-2 pr-3 font-semibold">
+                              {({ topup: "Nạp tiền", payment: "Thanh toán đơn", checkin: "Điểm danh", adjust: "Admin chỉnh", refund: "Hoàn tiền" } as Record<string, string>)[t.type] ?? t.type}
+                            </td>
+                            <td className={`py-2 pr-3 font-bold ${t.amount >= 0 ? "text-emerald-300" : "text-red-400"}`}>
+                              {t.amount >= 0 ? "+" : "−"}{formatVND(Math.abs(t.amount))}
+                            </td>
+                            <td className="py-2 pr-3">{formatVND(t.balance_after)}</td>
+                            <td className="py-2 pr-3 text-xs vd-muted">
+                              {t.ref_code ? <span className="font-mono">{t.ref_code}</span> : ""}
+                              {t.note ? ` ${t.note}` : ""}
+                            </td>
+                            <td className="py-2 text-xs vd-muted">{formatDateTime(t.created_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="vd-card p-4">
+            <h3 className="font-display font-bold">Chỉnh số dư tay</h3>
+            <p className="text-xs vd-muted mt-1">Cộng/trừ Xu cho khách kèm lý do — mọi thay đổi đều ghi sổ vào lịch sử giao dịch. Tra ví ở trên trước rồi chỉnh.</p>
+            <div className="grid sm:grid-cols-[200px_1fr_auto] gap-2 mt-3 items-end">
+              <label className="block">
+                <span className="field-label">Số Xu (âm = trừ) *</span>
+                <input
+                  value={adjustAmount}
+                  onChange={(e) => setAdjustAmount(e.target.value.replace(/[^\d-]/g, ""))}
+                  inputMode="numeric"
+                  placeholder="vd: 50000 hoặc -20000"
+                  className="field"
+                />
+              </label>
+              <label className="block">
+                <span className="field-label">Lý do *</span>
+                <input value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)} placeholder="vd: Bồi thường đơn lỗi" className="field" />
+              </label>
+              <ActionButton busy={busyKey === "adjust-wallet"} onClick={adjustWallet} className="btn-primary !py-2.5 text-sm">
+                {busyKey === "adjust-wallet" ? "Đang lưu…" : "Áp dụng"}
+              </ActionButton>
+            </div>
+          </div>
+
+          <div className="vd-card p-4">
+            <h3 className="font-display font-bold">Cài đặt điểm danh</h3>
+            <p className="text-xs vd-muted mt-1">Số Xu khách nhận mỗi ngày khi điểm danh — mức chủ nhật riêng.</p>
+            <div className="grid sm:grid-cols-[200px_200px_auto] gap-2 mt-3 items-end">
+              <label className="block">
+                <span className="field-label">Ngày thường (Xu/ngày)</span>
+                <input type="number" min={0} value={checkinDaily} onChange={(e) => setCheckinDaily(e.target.value)} className="field" placeholder="50" />
+              </label>
+              <label className="block">
+                <span className="field-label">Chủ nhật (Xu/ngày)</span>
+                <input type="number" min={0} value={checkinSunday} onChange={(e) => setCheckinSunday(e.target.value)} className="field" placeholder="200" />
+              </label>
+              <ActionButton busy={busyKey === "save-checkin"} onClick={saveCheckinSettings} className="btn-primary !py-2.5 text-sm">
+                {busyKey === "save-checkin" ? "Đang lưu…" : "Lưu cài đặt"}
+              </ActionButton>
+            </div>
           </div>
         </div>
       )}

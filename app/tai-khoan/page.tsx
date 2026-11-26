@@ -2,11 +2,21 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { Check, Clock, Copy } from "lucide-react";
-import { useAuth, useToast } from "@/components/providers";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CalendarCheck, Check, Clock, Coins, Copy, Loader2, Wallet } from "lucide-react";
+import { isSupabaseConfigured, useAuth, useToast } from "@/components/providers";
 import { formatDateTime, formatVND } from "@/lib/format";
+import { getAccessToken, WALLET_TX_LABELS, type WalletTransaction } from "@/lib/wallet-client";
 import type { Order } from "@/lib/types";
+
+const TOPUP_QUICK = [50_000, 100_000, 200_000, 500_000];
+
+interface CheckinStatus {
+  checked_in_today: boolean;
+  streak: number;
+  daily_amount: number;
+  sunday_amount: number;
+}
 
 export default function AccountPage() {
   const auth = useAuth();
@@ -18,6 +28,176 @@ export default function AccountPage() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+
+  // --- Ví Xu + điểm danh (v4.7) — chỉ tài khoản thật ---
+  const hasRealSession = Boolean(auth.user && !auth.user.isDemo && isSupabaseConfigured);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [topupAmount, setTopupAmount] = useState("");
+  const [topupBusy, setTopupBusy] = useState(false);
+  const [topupInfo, setTopupInfo] = useState<{ checkout_url: string; qrImage: string; topup_code: string; amount: number } | null>(null);
+  const [topupMsg, setTopupMsg] = useState("");
+  const topupBaseRef = useRef<number | null>(null);
+  const topupTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [checkin, setCheckin] = useState<CheckinStatus | null>(null);
+  const [checkinBusy, setCheckinBusy] = useState(false);
+  const [checkinMsg, setCheckinMsg] = useState("");
+
+  const loadWallet = useCallback(async () => {
+    const token = await getAccessToken();
+    if (!token) return;
+    setWalletLoading(true);
+    try {
+      const res = await fetch("/api/wallet/balance", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        setWalletBalance(Number(json.balance ?? 0));
+        setTransactions(((json.transactions ?? []) as WalletTransaction[]).slice(0, 20));
+      }
+    } catch {
+      /* ví chưa sẵn sàng: chỉ ẩn phần ví */
+    } finally {
+      setWalletLoading(false);
+    }
+  }, []);
+
+  const loadCheckin = useCallback(async () => {
+    const token = await getAccessToken();
+    if (!token) return;
+    try {
+      const res = await fetch("/api/checkin", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setCheckin((await res.json()) as CheckinStatus);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasRealSession) return;
+    loadWallet();
+    loadCheckin();
+  }, [hasRealSession, loadWallet, loadCheckin]);
+
+  // Dừng poll nạp tiền khi rời trang.
+  useEffect(
+    () => () => {
+      if (topupTimerRef.current) clearInterval(topupTimerRef.current);
+    },
+    [],
+  );
+
+  async function doTopup() {
+    const amount = Number(topupAmount);
+    if (!amount || amount < 10_000) {
+      setTopupMsg("Nạp tối thiểu 10.000đ.");
+      return;
+    }
+    if (amount > 50_000_000) {
+      setTopupMsg("Nạp tối đa 50.000.000đ mỗi lần.");
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) {
+      setTopupMsg("Chưa đăng nhập — đăng nhập lại rồi nạp tiền.");
+      return;
+    }
+    setTopupBusy(true);
+    setTopupMsg("");
+    setTopupInfo(null);
+    try {
+      const res = await fetch("/api/wallet/topup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Không tạo được yêu cầu nạp tiền");
+      topupBaseRef.current = walletBalance ?? 0;
+      setTopupInfo({
+        checkout_url: data.checkout_url,
+        qrImage: data.qrImage,
+        topup_code: data.topup_code,
+        amount: Number(data.amount ?? amount),
+      });
+      // Poll số dư mỗi 3s, tối đa 5 phút — tiền về thì báo thành công.
+      const started = Date.now();
+      if (topupTimerRef.current) clearInterval(topupTimerRef.current);
+      topupTimerRef.current = setInterval(async () => {
+        try {
+          const t = await getAccessToken();
+          if (!t) return;
+          const r = await fetch("/api/wallet/balance", {
+            headers: { Authorization: `Bearer ${t}` },
+          });
+          if (!r.ok) return;
+          const j = await r.json();
+          const bal = Number(j.balance ?? 0);
+          if (topupBaseRef.current !== null && bal > topupBaseRef.current) {
+            if (topupTimerRef.current) clearInterval(topupTimerRef.current);
+            topupTimerRef.current = null;
+            setWalletBalance(bal);
+            setTransactions(((j.transactions ?? []) as WalletTransaction[]).slice(0, 20));
+            setTopupMsg(`Nạp thành công ${formatVND(bal - topupBaseRef.current)} — số dư mới ${formatVND(bal)}.`);
+            setTopupInfo(null);
+            try {
+              window.dispatchEvent(new Event("vdigital:wallet-updated"));
+            } catch {
+              /* ignore */
+            }
+          }
+        } catch {
+          /* lần poll sau thử lại */
+        }
+        if (Date.now() - started > 5 * 60_000 && topupTimerRef.current) {
+          clearInterval(topupTimerRef.current);
+          topupTimerRef.current = null;
+          setTopupMsg("Chưa thấy tiền về sau 5 phút — kiểm tra lại giao dịch ngân hàng hoặc liên hệ shop kèm mã nạp.");
+        }
+      }, 3000);
+    } catch (e) {
+      setTopupMsg(e instanceof Error ? e.message : "Lỗi nạp tiền");
+    } finally {
+      setTopupBusy(false);
+    }
+  }
+
+  async function doCheckin() {
+    const token = await getAccessToken();
+    if (!token) return;
+    setCheckinBusy(true);
+    setCheckinMsg("");
+    try {
+      const res = await fetch("/api/checkin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Điểm danh thất bại");
+      if (data.already) {
+        setCheckinMsg("Hôm nay bạn đã điểm danh rồi.");
+      } else {
+        setCheckinMsg(`Điểm danh thành công — nhận ${formatVND(Number(data.amount ?? 0))} Xu, chuỗi ${data.streak ?? 0} ngày.`);
+        if (typeof data.balance === "number") setWalletBalance(data.balance);
+      }
+      await loadCheckin();
+      await loadWallet();
+      try {
+        window.dispatchEvent(new Event("vdigital:wallet-updated"));
+      } catch {
+        /* ignore */
+      }
+    } catch (e) {
+      setCheckinMsg(e instanceof Error ? e.message : "Lỗi điểm danh");
+    } finally {
+      setCheckinBusy(false);
+    }
+  }
 
   async function copyCode(code: string) {
     try {
@@ -96,6 +276,137 @@ export default function AccountPage() {
           Bạn chưa đăng nhập — vẫn xem được đơn bằng mã đơn bên dưới. Đăng nhập (nút Tài khoản ở header) để lưu lịch sử đơn theo tài khoản.
         </p>
       )}
+
+      {hasRealSession && (
+        <div className="grid md:grid-cols-2 gap-4 mt-5 items-start">
+          {/* Ví Xu */}
+          <div className="vd-card p-5">
+            <h2 className="font-bold flex items-center gap-2">
+              <Wallet size={18} aria-hidden="true" className="text-amber-300" /> Ví Xu
+            </h2>
+            <p className="mt-2 text-sm vd-muted">
+              Số dư:{" "}
+              <b className="text-amber-300 text-lg">{walletLoading && walletBalance === null ? "Đang tải…" : formatVND(walletBalance ?? 0)}</b> Xu
+              <span className="vd-muted2"> · 1 Xu = 1đ, dùng để thanh toán đơn hàng</span>
+            </p>
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {TOPUP_QUICK.map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setTopupAmount(String(a))}
+                  className={`chip !py-1.5 !px-3 text-sm font-semibold ${topupAmount === String(a) ? "!border-amber-400 text-amber-300" : ""}`}
+                >
+                  {formatVND(a)}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-3">
+              <input
+                value={topupAmount}
+                onChange={(e) => setTopupAmount(e.target.value.replace(/[^\d]/g, ""))}
+                inputMode="numeric"
+                placeholder="Số tiền nạp (tối thiểu 10.000đ)"
+                className="field flex-1"
+                aria-label="Số tiền nạp"
+              />
+              <button
+                onClick={() => void doTopup()}
+                disabled={topupBusy}
+                className="rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-2 text-sm font-bold text-black disabled:opacity-50"
+              >
+                {topupBusy ? "Đang tạo…" : "Nạp tiền"}
+              </button>
+            </div>
+            {topupMsg && (
+              <p role="status" className={`mt-2 text-sm font-semibold ${topupMsg.startsWith("Nạp thành công") ? "text-emerald-300" : "text-amber-300"}`}>
+                {topupMsg}
+              </p>
+            )}
+            {topupInfo && (
+              <div className="mt-3 rounded-xl border vd-border p-4 text-center">
+                <p className="text-sm font-semibold">
+                  Nạp {formatVND(topupInfo.amount)} — mã nạp <b className="font-mono">{topupInfo.topup_code}</b>
+                </p>
+                {topupInfo.qrImage ? (
+                  <div className="mt-3 rounded-2xl bg-white p-3 inline-block">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={topupInfo.qrImage} alt="VietQR nạp tiền" className="w-56 h-56" />
+                  </div>
+                ) : (
+                  <p className="text-sm vd-muted mt-3">Không tải được mã QR — bấm nút dưới để sang trang thanh toán PayOS.</p>
+                )}
+                <div>
+                  <a href={topupInfo.checkout_url} target="_blank" rel="noreferrer" className="inline-block mt-3 rounded-xl bg-brand-600 hover:bg-brand-700 px-5 py-2.5 text-sm font-semibold text-white">
+                    Mở trang thanh toán PayOS
+                  </a>
+                </div>
+                <p className="text-xs vd-muted2 mt-2">Đang chờ tiền về… trang này sẽ tự báo khi số dư tăng.</p>
+              </div>
+            )}
+            <h3 className="font-bold text-sm mt-5">Lịch sử giao dịch</h3>
+            {transactions.length === 0 ? (
+              <p className="text-sm vd-muted mt-1">Chưa có giao dịch nào.</p>
+            ) : (
+              <ul className="mt-2 space-y-1.5 text-sm max-h-72 overflow-y-auto">
+                {transactions.map((t) => (
+                  <li key={t.id} className="flex items-center justify-between gap-2 rounded-lg vd-card-flat px-3 py-2">
+                    <span className="min-w-0">
+                      <span className="block font-semibold truncate">{WALLET_TX_LABELS[t.type] ?? t.type}{t.ref_code ? <span className="font-mono text-xs vd-muted"> · {t.ref_code}</span> : null}</span>
+                      <span className="block text-xs vd-muted">{formatDateTime(t.created_at)}{t.note ? ` — ${t.note}` : ""}</span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className={`block font-bold ${t.amount >= 0 ? "text-emerald-300" : "text-red-400"}`}>
+                        {t.amount >= 0 ? "+" : "−"}{formatVND(Math.abs(t.amount))}
+                      </span>
+                      <span className="block text-xs vd-muted">Còn {formatVND(t.balance_after)}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Điểm danh */}
+          <div className="vd-card p-5">
+            <h2 className="font-bold flex items-center gap-2">
+              <CalendarCheck size={18} aria-hidden="true" className="text-emerald-400" /> Điểm danh nhận Xu
+            </h2>
+            {checkin ? (
+              <>
+                <p className="mt-2 text-sm vd-muted">
+                  Chuỗi <b className="text-white">{checkin.streak} ngày</b>
+                  {checkin.checked_in_today ? " — hôm nay đã điểm danh." : " — hôm nay chưa điểm danh."}
+                </p>
+                <p className="text-sm vd-muted mt-1">
+                  Ngày thường +{formatVND(checkin.daily_amount)} Xu · Chủ nhật +{formatVND(checkin.sunday_amount)} Xu
+                </p>
+                <button
+                  onClick={() => void doCheckin()}
+                  disabled={checkinBusy || checkin.checked_in_today}
+                  className="btn-primary mt-3 w-full disabled:opacity-50"
+                >
+                  {checkinBusy ? (
+                    <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Coins size={18} aria-hidden="true" />
+                  )}
+                  {checkin.checked_in_today ? "Đã điểm danh hôm nay" : "Điểm danh nhận Xu"}
+                </button>
+                {checkinMsg && (
+                  <p role="status" className="mt-2 text-sm font-semibold text-emerald-300">{checkinMsg}</p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm vd-muted mt-2">Đang tải thông tin điểm danh…</p>
+            )}
+            <p className="text-xs vd-muted2 mt-3">
+              Điểm danh mỗi ngày để tích Xu — Xu dùng để thanh toán đơn hàng, 1 Xu = 1đ.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="py-6">
         <label className="field-label" htmlFor="order-lookup">Tra cứu đơn hàng bằng mã đơn</label>
           <div className="flex gap-2 max-w-md">

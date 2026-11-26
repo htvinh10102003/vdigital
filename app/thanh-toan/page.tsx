@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Loader2 } from "lucide-react";
-import { useAuth, useCart, useCatalog } from "@/components/providers";
+import { Clock, Coins, Eye, EyeOff, Loader2, Ticket } from "lucide-react";
+import { isSupabaseConfigured, useAuth, useCart, useCatalog } from "@/components/providers";
 import { formatVND } from "@/lib/format";
 import { ProductImage } from "@/components/ProductImage";
+import { getAccessToken, type PublicVoucher } from "@/lib/wallet-client";
 import type { ManualField, Order } from "@/lib/types";
 
 type PayState = "form" | "paying" | "done";
@@ -56,6 +58,50 @@ export default function CheckoutPage() {
   // Thông tin khách điền theo manual_fields của từng gói làm tay —
   // key: variantId → fieldId → giá trị.
   const [customerInfo, setCustomerInfo] = useState<Record<string, Record<string, string>>>({});
+  // Hiện/ẩn ô mật khẩu trong manual_fields: key `${variantId}:${fieldId}`.
+  const [showPw, setShowPw] = useState<Record<string, boolean>>({});
+
+  // --- Ví Xu + voucher (v4.7) ---
+  // Chỉ tài khoản thật (đã đăng nhập Supabase, không phải demo) mới dùng Xu.
+  const hasRealSession = Boolean(auth.user && !auth.user.isDemo && isSupabaseConfigured);
+  const [paymentMethod, setPaymentMethod] = useState<"vietqr" | "xu">("vietqr");
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [voucherInput, setVoucherInput] = useState("");
+  const [appliedVoucher, setAppliedVoucher] = useState<{ code: string; discount: number } | null>(null);
+  const [voucherMsg, setVoucherMsg] = useState("");
+  const [voucherBusy, setVoucherBusy] = useState(false);
+  const [publicVouchers, setPublicVouchers] = useState<PublicVoucher[]>([]);
+
+  useEffect(() => {
+    if (!hasRealSession) {
+      setWalletBalance(null);
+      return;
+    }
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token) return;
+        const res = await fetch("/api/wallet/balance", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) setWalletBalance(Number((await res.json()).balance ?? 0));
+      } catch {
+        /* ví chưa sẵn sàng: checkout vẫn chạy bằng VietQR */
+      }
+    })();
+  }, [hasRealSession]);
+
+  // Voucher công khai: ai cũng xem được, bấm để điền mã.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/vouchers/public");
+        if (res.ok) setPublicVouchers(((await res.json()).vouchers ?? []) as PublicVoucher[]);
+      } catch {
+        /* không có voucher công khai thì ẩn mục này */
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (auth.user) {
@@ -72,6 +118,40 @@ export default function CheckoutPage() {
     })
     .filter((l) => l.product && l.variant);
   const total = lines.reduce((s, l) => s + (l.variant?.price ?? 0) * l.item.qty, 0);
+  const voucherDiscount = appliedVoucher?.discount ?? 0;
+  const payable = Math.max(0, total - voucherDiscount);
+  const xuEnough = walletBalance !== null && walletBalance >= payable;
+
+  async function applyVoucher(code?: string) {
+    const c = (code ?? voucherInput).trim().toUpperCase();
+    if (!c) return;
+    if (!email.includes("@")) {
+      setVoucherMsg("Nhập email hợp lệ trước khi áp mã giảm giá.");
+      return;
+    }
+    setVoucherBusy(true);
+    setVoucherMsg("");
+    try {
+      const res = await fetch("/api/vouchers/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: c, order_total: total, customer_email: email.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setAppliedVoucher({ code: c, discount: Number(data.discount ?? 0) });
+        setVoucherInput(c);
+        setVoucherMsg(`Đã áp mã ${c} — giảm ${formatVND(Number(data.discount ?? 0))}.`);
+      } else {
+        setAppliedVoucher(null);
+        setVoucherMsg(data.error || "Mã không áp dụng được cho đơn này.");
+      }
+    } catch {
+      setVoucherMsg("Không kiểm tra được mã — thử lại sau.");
+    } finally {
+      setVoucherBusy(false);
+    }
+  }
 
   async function createPayment() {
     setError("");
@@ -97,19 +177,29 @@ export default function CheckoutPage() {
         }
       }
     }
+    if (paymentMethod === "xu" && !xuEnough) {
+      setError("Số dư Xu không đủ cho đơn này — nạp thêm Xu rồi thử lại.");
+      return;
+    }
     setState("paying");
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (auth.user && !auth.user.isDemo) {
+        const token = await getAccessToken();
+        if (token) headers.Authorization = `Bearer ${token}`;
+      }
       const res = await fetch("/api/payos/create-payment", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           items: cart.items.map((i) => ({ variantId: i.variantId, qty: i.qty, customerInfo: customerInfo[i.variantId] ?? {} })),
           customer: { name: name.trim(), email: email.trim(), phone: phone.trim(), userId: null },
+          payment_method: paymentMethod,
+          voucher_code: appliedVoucher?.code ?? null,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Không tạo được đơn hàng");
-      setPayInfo(data);
       try {
         const raw = localStorage.getItem("vdigital-my-orders");
         const list: string[] = raw ? JSON.parse(raw) : [];
@@ -118,6 +208,24 @@ export default function CheckoutPage() {
       } catch {
         /* ignore */
       }
+      if (data.xu) {
+        // Thanh toán bằng Xu: trừ ví + giao hàng ngay phía server, không có
+        // QR và không cần polling — sang màn hình thành công luôn.
+        const o = (data.order ?? null) as Order | null;
+        if (o) {
+          setOrder(o);
+          cart.clear();
+          setState("done");
+          try {
+            window.dispatchEvent(new Event("vdigital:wallet-updated"));
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        throw new Error("Thanh toán Xu xong nhưng không nhận được đơn hàng.");
+      }
+      setPayInfo(data);
       if (!data.demo) {
         // PayOS thật: poll trạng thái đơn — webhook sẽ đổi trạng thái khi tiền về.
         // Chỉ chuyển sang màn hình thành công khi đơn thật sự đã trả
@@ -383,6 +491,7 @@ export default function CheckoutPage() {
                       placeholder: f.placeholder || "",
                       className: "field",
                     };
+                    const pwKey = `${variant!.id}:${f.id}`;
                     return (
                       <div key={f.id}>
                         <label className="field-label" htmlFor={inputProps.id}>
@@ -390,6 +499,23 @@ export default function CheckoutPage() {
                         </label>
                         {f.type === "textarea" ? (
                           <textarea {...inputProps} rows={2} />
+                        ) : f.type === "password" ? (
+                          <div className="relative">
+                            <input
+                              {...inputProps}
+                              type={showPw[pwKey] ? "text" : "password"}
+                              autoComplete="off"
+                              className="field !pr-11"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPw((prev) => ({ ...prev, [pwKey]: !prev[pwKey] }))}
+                              aria-label={showPw[pwKey] ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 vd-muted hover:text-white"
+                            >
+                              {showPw[pwKey] ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+                            </button>
+                          </div>
                         ) : (
                           <input
                             {...inputProps}
@@ -403,10 +529,111 @@ export default function CheckoutPage() {
                   <p className="field-hint">Shop dùng thông tin này để xử lý đơn làm tay cho bạn.</p>
                 </div>
               ))}
+            {/* Mã giảm giá */}
+            <div className="rounded-xl border vd-border p-4 space-y-2">
+              <p className="text-sm font-bold flex items-center gap-2">
+                <Ticket size={16} aria-hidden="true" className="text-brand-400" /> Mã giảm giá
+              </p>
+              {appliedVoucher ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 px-3 py-2 text-sm">
+                  <span>
+                    <b className="font-mono">{appliedVoucher.code}</b>
+                    <span className="text-emerald-300"> — giảm {formatVND(appliedVoucher.discount)}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppliedVoucher(null);
+                      setVoucherMsg("");
+                    }}
+                    className="text-sm font-semibold text-red-400 hover:underline"
+                  >
+                    Gỡ mã
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    value={voucherInput}
+                    onChange={(e) => setVoucherInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === "Enter" && void applyVoucher()}
+                    placeholder="Nhập mã voucher"
+                    className="field flex-1 font-mono"
+                    aria-label="Mã giảm giá"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void applyVoucher()}
+                    disabled={voucherBusy || !voucherInput.trim()}
+                    className="rounded-xl bg-brand-600 hover:bg-brand-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {voucherBusy ? "Đang kiểm tra…" : "Áp dụng"}
+                  </button>
+                </div>
+              )}
+              {voucherMsg && !appliedVoucher && <p role="alert" className="text-xs text-amber-300">{voucherMsg}</p>}
+              {publicVouchers.length > 0 && !appliedVoucher && (
+                <div className="flex flex-wrap gap-1.5">
+                  {publicVouchers.map((v) => (
+                    <button
+                      key={v.code}
+                      type="button"
+                      onClick={() => void applyVoucher(v.code)}
+                      className="chip !py-1 !px-2.5 text-xs font-mono"
+                      title={v.type === "percent" ? `Giảm ${v.value}%` : `Giảm ${formatVND(v.value)}`}
+                    >
+                      {v.code}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Phương thức thanh toán — Xu chỉ hiện với tài khoản thật */}
+            {hasRealSession && (
+              <div className="space-y-2">
+                <p className="field-label">Phương thức thanh toán</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod("vietqr")}
+                    aria-pressed={paymentMethod === "vietqr"}
+                    className={`rounded-xl border px-3 py-3 text-left text-sm font-semibold ${paymentMethod === "vietqr" ? "border-brand-500 bg-brand-500/10 text-white" : "vd-border vd-card-flat vd-muted"}`}
+                  >
+                    VietQR
+                    <span className="block text-xs font-normal vd-muted mt-0.5">Quét mã, tự xác nhận</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => xuEnough && setPaymentMethod("xu")}
+                    disabled={!xuEnough}
+                    aria-pressed={paymentMethod === "xu"}
+                    className={`rounded-xl border px-3 py-3 text-left text-sm font-semibold ${paymentMethod === "xu" ? "border-amber-400 bg-amber-400/10 text-white" : "vd-border vd-card-flat vd-muted"} disabled:opacity-70`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Coins size={15} aria-hidden="true" className="text-amber-300" /> Thanh toán bằng Xu
+                    </span>
+                    <span className="block text-xs font-normal vd-muted mt-0.5">
+                      {walletBalance === null ? "Đang tải số dư…" : `Số dư: ${formatVND(walletBalance)} Xu`}
+                    </span>
+                  </button>
+                </div>
+                {walletBalance !== null && walletBalance < payable && (
+                  <p className="rounded-xl bg-amber-500/10 border border-amber-500/40 px-3 py-2.5 text-sm text-amber-300">
+                    Số dư Xu ({formatVND(walletBalance)}) chưa đủ {formatVND(payable)} cho đơn này.{" "}
+                    <Link href="/tai-khoan" className="font-bold underline">Nạp ngay</Link>
+                  </p>
+                )}
+              </div>
+            )}
             {error && <p role="alert" className="rounded-xl bg-red-500/10 border border-red-500/40 px-3 py-2.5 text-sm font-semibold text-red-400">{error}</p>}
-            <button onClick={createPayment} disabled={state === "paying"} className="btn-primary w-full disabled:opacity-60">
+            <button onClick={createPayment} disabled={state === "paying" || (paymentMethod === "xu" && !xuEnough)} className="btn-primary w-full disabled:opacity-60">
               {state === "paying" && <Loader2 size={18} className="animate-spin" aria-hidden="true" />}
-              {state === "paying" ? "Đang tạo đơn…" : `Thanh toán VietQR — ${formatVND(total)}`}
+              {state === "paying"
+                ? "Đang tạo đơn…"
+                : paymentMethod === "xu"
+                  ? `Thanh toán bằng Xu — ${formatVND(payable)}`
+                  : `Thanh toán VietQR — ${formatVND(payable)}`}
             </button>
             <p className="text-xs vd-muted2 text-center">PayOS VietQR — miễn phí, 0% phí giao dịch, tự động duyệt đơn sau khi thanh toán.</p>
           </div>
@@ -451,9 +678,15 @@ export default function CheckoutPage() {
                   {savings > 0 && (
                     <div className="flex justify-between text-emerald-300"><span>Giảm giá</span><span>−{formatVND(savings)}</span></div>
                   )}
+                  {voucherDiscount > 0 && (
+                    <div className="flex justify-between text-emerald-300">
+                      <span>Giảm giá (voucher {appliedVoucher!.code})</span>
+                      <span>−{formatVND(voucherDiscount)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-bold text-base pt-1">
                     <span>Tổng thanh toán</span>
-                    <span className="text-brand-400">{formatVND(total)}</span>
+                    <span className="text-brand-400">{formatVND(payable)}</span>
                   </div>
                 </div>
               );

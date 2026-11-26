@@ -199,6 +199,10 @@ export async function createOrder(input: {
   customer_phone: string;
   user_id: string | null;
   items: { variantId: string; qty: number; customerInfo?: Record<string, string> }[];
+  /** v4.7: voucher đã validate phía server + số tiền giảm (≥ 0). */
+  voucherCode?: string | null;
+  discountAmount?: number;
+  paymentMethod?: string;
 }): Promise<Order> {
   const catalog = await getCatalog();
   let total = 0;
@@ -227,6 +231,8 @@ export async function createOrder(input: {
       customer_info: it.customerInfo ?? null,
     });
   }
+  const discount = Math.max(0, Math.min(input.discountAmount ?? 0, total));
+  total -= discount;
   const order: Order = {
     id: `ord-${Math.random().toString(36).slice(2, 10)}`,
     code: newOrderCode(),
@@ -237,10 +243,12 @@ export async function createOrder(input: {
     user_id: input.user_id,
     status: "pending",
     total,
-    payment_method: "payos-vietqr",
+    payment_method: input.paymentMethod ?? "payos-vietqr",
     payment_link_id: null,
     checkout_url: null,
     admin_note: null,
+    voucher_code: input.voucherCode ?? null,
+    discount_amount: discount,
     created_at: new Date().toISOString(),
     items,
   };
@@ -251,22 +259,36 @@ export async function createOrder(input: {
     // Chưa có service_role thì dừng ngay với lỗi rõ ràng — đừng để anon
     // client chạm vào bảng orders rồi nhận "permission denied for table orders".
     requireServiceRoleForWrite();
-    const { data: ord, error } = await sb
-      .from("orders")
-      .insert({
-        code: order.code,
-        payos_order_code: order.payos_order_code,
-        customer_name: order.customer_name,
-        customer_email: order.customer_email,
-        customer_phone: order.customer_phone,
-        user_id: order.user_id,
-        status: order.status,
-        total: order.total,
-        payment_method: order.payment_method,
-      })
-      .select("*")
-      .single();
-    if (error) throw new Error(`Lưu đơn vào Supabase thất bại: ${error.message}`);
+    const orderRow: Record<string, unknown> = {
+      code: order.code,
+      payos_order_code: order.payos_order_code,
+      customer_name: order.customer_name,
+      customer_email: order.customer_email,
+      customer_phone: order.customer_phone,
+      user_id: order.user_id,
+      status: order.status,
+      total: order.total,
+      payment_method: order.payment_method,
+      voucher_code: order.voucher_code,
+      discount_amount: order.discount_amount,
+    };
+    let ord: any = null;
+    let ordErr: { message: string } | null = null;
+    {
+      const res = await sb.from("orders").insert(orderRow).select("*").single();
+      ord = res.data;
+      ordErr = res.error;
+      // DB chưa chạy migration 009 (chưa có cột voucher) thì lưu lại
+      // không kèm voucher — đơn vẫn phải lưu được, không được hỏng.
+      if (ordErr && /voucher_code|discount_amount/.test(ordErr.message)) {
+        delete orderRow.voucher_code;
+        delete orderRow.discount_amount;
+        const retry = await sb.from("orders").insert(orderRow).select("*").single();
+        ord = retry.data;
+        ordErr = retry.error;
+      }
+    }
+    if (ordErr) throw new Error(`Lưu đơn vào Supabase thất bại: ${ordErr.message}`);
     let savedItems = null as OrderItem[] | null;
     let itemErr = null as { message: string } | null;
     {

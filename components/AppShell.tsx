@@ -27,6 +27,7 @@ import { maxDiscount } from "@/lib/catalog-utils";
 import { Logo } from "./Logo";
 import { AuthModal } from "./AuthModal";
 import { NotificationsBell } from "./NotificationsBell";
+import { WalletChip } from "./WalletChip";
 
 const NAV = [
   { href: "/", label: "Trang chủ", icon: Home },
@@ -347,6 +348,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               {light ? <Moon size={18} /> : <Sun size={18} />}
             </button>
+            <WalletChip />
             <NotificationsBell />
             {auth.user ? (
               <AvatarMenu />

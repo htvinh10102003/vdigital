@@ -56,7 +56,7 @@ export interface Variant {
 export interface ManualField {
   id: string;
   label: string;
-  type: "text" | "email" | "number" | "textarea";
+  type: "text" | "email" | "number" | "textarea" | "password";
   required: boolean;
   placeholder: string;
 }
@@ -163,6 +163,9 @@ export interface Order {
   payment_link_id: string | null;
   checkout_url: string | null;
   admin_note: string | null;
+  /** Mã voucher đã dùng + số tiền đã giảm (v4.7). */
+  voucher_code?: string | null;
+  discount_amount?: number;
   created_at: string;
   items: OrderItem[];
 }

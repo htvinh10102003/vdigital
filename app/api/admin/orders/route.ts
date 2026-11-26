@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { forbidden, getAdminEmail } from "@/lib/admin-auth";
 import { completeManualItem, deliverGameCard, fulfillPaidOrder } from "@/lib/fulfill";
+import { notifyOrderDelivered } from "@/lib/notifications";
 import { getOrderByCode, listOrders } from "@/lib/store";
 
 // Dữ liệu đổi liên tục (đơn, kho, catalog) — không cache response GET.
@@ -58,10 +59,14 @@ export async function POST(req: Request) {
         denomination,
         note,
       });
+      // Giao xong hết đơn thì báo khách "đã giao" (mail thẻ game đã gửi riêng).
+      if (order.status === "completed") await notifyOrderDelivered(order);
       return NextResponse.json({ ok: true, order });
     }
     if (action === "complete-manual") {
       const order = await completeManualItem(orderCode, itemId, (body as { note?: string }).note ?? "");
+      // Hoàn thành tay xong hết đơn thì báo khách "đã giao" (mail đã gửi riêng).
+      if (order.status === "completed") await notifyOrderDelivered(order);
       return NextResponse.json({ ok: true, order });
     }
     return NextResponse.json({ error: "Action không hợp lệ" }, { status: 400 });

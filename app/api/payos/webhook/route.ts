@@ -3,6 +3,8 @@ import { fulfillPaidOrder } from "@/lib/fulfill";
 import { getPayosPaymentStatus, isPayosConfigured, verifyPayosSignature } from "@/lib/payos";
 import { getOrderByCode, getOrderByPayosCode } from "@/lib/store";
 import { getSupabaseServer } from "@/lib/supabase";
+import { adjustBalance } from "@/lib/wallet";
+import { createNotification } from "@/lib/notifications";
 
 /**
  * Webhook PayOS — POST /api/payos/webhook
@@ -25,6 +27,88 @@ export async function GET() {
   // PayOS và công cụ kiểm tra có thể gọi GET để kiểm tra endpoint còn sống.
   // Webhook thật luôn là POST, nên GET chỉ báo trạng thái, không xử lý gì.
   return NextResponse.json({ ok: true, service: "payos-webhook", method: "POST" });
+}
+
+/**
+ * Xử lý webhook nạp Xu: payos orderCode không khớp đơn hàng nào thì tra
+ * bảng wallet_topups. Chiếm yêu cầu nạp trước (status pending -> paid,
+ * có điều kiện) rồi mới cộng tiền — webhook gửi lại 2 lần cũng chỉ cộng
+ * 1 lần. Cộng tiền hỏng thì trả về pending để PayOS gửi lại sau.
+ */
+async function handleWalletTopupWebhook(input: {
+  orderCode: number;
+  amount: number;
+  signatureOk: boolean;
+  raw: unknown;
+}): Promise<"handled" | "already" | "amount_mismatch" | "not-found"> {
+  const sb = getSupabaseServer();
+  if (!sb) return "not-found";
+  const { data: tp } = await sb
+    .from("wallet_topups")
+    .select("*")
+    .eq("payos_order_code", input.orderCode)
+    .single();
+  if (!tp) return "not-found";
+  if (tp.status !== "pending") {
+    await logWebhook({
+      payos_code: input.orderCode,
+      amount: input.amount,
+      code: "00",
+      signature_ok: input.signatureOk,
+      outcome: "already_processed",
+      raw: input.raw,
+    });
+    return "already";
+  }
+  if (input.amount !== tp.amount) {
+    await logWebhook({
+      payos_code: input.orderCode,
+      amount: input.amount,
+      code: "00",
+      signature_ok: input.signatureOk,
+      outcome: "ignored_amount_mismatch",
+      error: `nạp ${input.amount} vs yêu cầu ${tp.amount}`,
+      raw: input.raw,
+    });
+    return "amount_mismatch";
+  }
+  const { data: claimed } = await sb
+    .from("wallet_topups")
+    .update({ status: "paid" })
+    .eq("id", tp.id)
+    .eq("status", "pending")
+    .select("id")
+    .single();
+  if (!claimed) return "already";
+  try {
+    const balanceAfter = await adjustBalance({
+      userId: tp.user_id,
+      email: tp.customer_email,
+      amount: tp.amount,
+      type: "topup",
+      refCode: `TOPUP-${tp.payos_order_code}`,
+      note: `Nạp ${tp.amount} Xu qua VietQR`,
+    });
+    await logWebhook({
+      payos_code: input.orderCode,
+      amount: input.amount,
+      code: "00",
+      signature_ok: input.signatureOk,
+      outcome: "topup_fulfilled",
+      raw: input.raw,
+    });
+    await createNotification({
+      userId: tp.user_id,
+      email: tp.customer_email,
+      type: "info",
+      title: "Nạp Xu thành công",
+      body: `Bạn đã nạp ${tp.amount.toLocaleString("vi-VN")} Xu. Số dư hiện tại: ${balanceAfter.toLocaleString("vi-VN")} Xu.`,
+    });
+    return "handled";
+  } catch (err) {
+    await sb.from("wallet_topups").update({ status: "pending" }).eq("id", tp.id);
+    throw err; // outer catch ghi error_500, trả 500 để PayOS gửi lại
+  }
 }
 
 async function logWebhook(entry: {
@@ -122,6 +206,18 @@ export async function POST(req: Request) {
     }
     const order = await getOrderByPayosCode(orderCode);
     if (!order) {
+      // Không phải đơn hàng — có thể là nạp Xu: tra bảng wallet_topups.
+      const topup = await handleWalletTopupWebhook({
+        orderCode,
+        amount,
+        signatureOk,
+        raw: body,
+      });
+      if (topup === "handled") return NextResponse.json({ ok: true, topup: true });
+      if (topup === "already") return NextResponse.json({ ok: true, already: true });
+      if (topup === "amount_mismatch") {
+        return NextResponse.json({ ok: true, ignored: true, reason: "amount_mismatch" });
+      }
       // PayOS gửi yêu cầu kiểm tra/xác minh webhook bằng dữ liệu thử
       // (orderCode không có thật) — trả 200 để PayOS lưu được webhook,
       // chỉ ghi log, không giao hàng. Đơn thật luôn có trong DB.
