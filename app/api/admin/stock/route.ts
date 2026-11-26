@@ -4,6 +4,9 @@ import { getSupabaseServer, isSupabaseConfigured, requireServiceRoleForWrite } f
 import { addDemoStockCodes, getCatalog, readDemoStockFile } from "@/lib/store";
 import { DEMO_STOCK } from "@/lib/seed";
 
+// Dữ liệu đổi liên tục (đơn, kho, catalog) — không cache response GET.
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/admin/stock — bảng kho mã đầy đủ: theo từng gói, tổng/đã dùng/
  * còn lại, trạng thái từng mã. Mã đã giao KHÔNG hiện nguyên mã (chỉ hiện

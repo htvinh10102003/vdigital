@@ -17,7 +17,11 @@ export const isPayosConfigured = Boolean(
 );
 
 export function createSignatureFromObj(obj: Record<string, unknown>, checksumKey: string): string {
-  const sortedKeys = Object.keys(obj).sort();
+  // PayOS bỏ qua field null/undefined khi ký (vd webhook có
+  // counterAccountName: null) — đưa "null" vào chuỗi thì chữ ký sai.
+  const sortedKeys = Object.keys(obj)
+    .filter((k) => obj[k] !== null && obj[k] !== undefined)
+    .sort();
   const data = sortedKeys.map((k) => `${k}=${obj[k]}`).join("&");
   return crypto.createHmac("sha256", checksumKey).update(data).digest("hex");
 }

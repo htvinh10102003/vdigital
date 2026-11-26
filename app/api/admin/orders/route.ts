@@ -3,6 +3,9 @@ import { forbidden, getAdminEmail } from "@/lib/admin-auth";
 import { completeManualItem, deliverGameCard, fulfillPaidOrder } from "@/lib/fulfill";
 import { getOrderByCode, listOrders } from "@/lib/store";
 
+// Dữ liệu đổi liên tục (đơn, kho, catalog) — không cache response GET.
+export const dynamic = "force-dynamic";
+
 export async function GET(req: Request) {
   const email = await getAdminEmail(req);
   if (!email) return forbidden();

@@ -3,6 +3,9 @@ import { forbidden, getAdminEmail } from "@/lib/admin-auth";
 import { getSupabaseServer, isSupabaseConfigured } from "@/lib/supabase";
 import { PAID_ORDER_STATUSES } from "@/lib/stats";
 
+// Dữ liệu đổi liên tục (đơn, kho, catalog) — không cache response GET.
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/admin/insights?from=YYYY-MM-DD&to=YYYY-MM-DD — Báo cáo doanh thu
  * + lượt xem. Mọi số tính thật từ orders/order_items/page_views.

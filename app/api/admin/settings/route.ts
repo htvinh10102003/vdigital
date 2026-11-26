@@ -4,6 +4,9 @@ import { envDiagnostics, getSupabaseServer, isSupabaseConfigured, supabaseEnvSou
 import { isMailConfigured } from "@/lib/email";
 import { isPayosConfigured } from "@/lib/payos";
 
+// Dữ liệu đổi liên tục (đơn, kho, catalog) — không cache response GET.
+export const dynamic = "force-dynamic";
+
 /** Trạng thái cấu hình cho tab Cài đặt — chỉ hiện tên biến + có/không, không trả giá trị thật. */
 export async function GET(req: Request) {
   const email = await getAdminEmail(req);

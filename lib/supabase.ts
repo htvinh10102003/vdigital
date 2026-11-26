@@ -75,7 +75,14 @@ export function getSupabase(): SupabaseClient | null {
 /** Client phía server (API routes). Dùng service_role khi có, để đọc/ghi kho + đơn. */
 export function getSupabaseServer(): SupabaseClient | null {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
-  if (url && serviceKey) return createClient(url, serviceKey);
+  // Next.js cache mặc định mọi fetch GET — Supabase SELECT cũng là GET nên
+  // đơn hàng đã đổi trạng thái vẫn bị trả về bản cũ (pending mãi). Ép no-store
+  // cho mọi truy vấn phía server để luôn đọc dữ liệu mới nhất.
+  const noStoreFetch = (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(input, { ...init, cache: "no-store" });
+  if (url && serviceKey) {
+    return createClient(url, serviceKey, { global: { fetch: noStoreFetch } });
+  }
   return getSupabase();
 }
 

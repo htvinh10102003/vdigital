@@ -3,6 +3,9 @@ import { forbidden, getAdminEmail } from "@/lib/admin-auth";
 import { DEFAULT_TEMPLATES, type EmailTemplateType } from "@/lib/email";
 import { getSupabaseServer, isSupabaseConfigured, requireServiceRoleForWrite } from "@/lib/supabase";
 
+// Dữ liệu đổi liên tục (đơn, kho, catalog) — không cache response GET.
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/admin/email-templates — danh sách mẫu đã lưu (theo loại + theo
  * sản phẩm). Chưa lưu gì thì trả mẫu mặc định để admin xem/sửa.

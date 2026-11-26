@@ -3,6 +3,9 @@ import { getSupabaseServer, isSupabaseConfigured } from "@/lib/supabase";
 import { getProductReviews } from "@/lib/stats";
 import type { Review } from "@/lib/types";
 
+// Dữ liệu đổi liên tục (đơn, kho, catalog) — không cache response GET.
+export const dynamic = "force-dynamic";
+
 function aggregate(reviews: Review[]) {
   const dist: [number, number, number, number, number] = [0, 0, 0, 0, 0];
   let total = 0;
