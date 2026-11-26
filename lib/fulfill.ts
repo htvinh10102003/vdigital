@@ -1,0 +1,144 @@
+import { deliveryEmailHtml, sendMail } from "./email";
+import { findVariant } from "./seed";
+import { getOrderByCode, takeStockCode, updateOrder } from "./store";
+import type { Order } from "./types";
+
+/**
+ * Giao hàng sau khi PayOS xác nhận đã thanh toán.
+ * - auto: lấy mã cũ nhất chưa dùng trong kho, giao ngay.
+ * - manual: đơn chuyển "Chờ xử lý" để admin làm tay (add Family / nâng cấp chính chủ).
+ * - game_card: đơn chuyển "Chờ xử lý" — admin điền serial + mã trong /admin rồi bấm "Giao + gửi mail".
+ * Mail lỗi cũng không làm hỏng đơn — chỉ log (xem lib/email.ts).
+ */
+
+function orderStatusAfter(order: Order): Order["status"] {
+  const items = order.items;
+  if (items.length && items.every((i) => i.status === "delivered")) return "completed";
+  if (items.some((i) => i.status === "waiting_manual" || i.status === "failed")) return "processing";
+  return "paid";
+}
+
+export async function fulfillPaidOrder(order: Order): Promise<Order> {
+  const emailLines: { label: string; value: string }[] = [];
+  let guide = "";
+  let warranty = 30;
+
+  for (const item of order.items) {
+    if (item.status !== "pending") continue;
+    const found = findVariant(item.variant_id);
+    if (found) {
+      guide = found.product.guide;
+      warranty = found.product.warranty_days;
+    }
+    if (item.fulfillment_type === "auto") {
+      const stock = await takeStockCode(item.variant_id, order.id);
+      if (stock) {
+        item.status = "delivered";
+        item.delivered_code = stock.code;
+        emailLines.push({ label: `${item.product_name} — ${item.variant_name}`, value: stock.code });
+      } else {
+        item.status = "failed";
+        item.delivered_note = "Hết mã trong kho — admin cần bổ sung mã rồi giao tay.";
+      }
+    } else {
+      // manual + game_card: chờ admin xử lý
+      item.status = "waiting_manual";
+    }
+  }
+
+  order.status = orderStatusAfter(order);
+  await updateOrder(order);
+
+  // Gửi mail giao hàng cho phần đã giao tự động (nếu có). Phần làm tay sẽ
+  // gửi mail riêng khi admin hoàn thành.
+  if (emailLines.length > 0) {
+    await sendMail({
+      to: order.customer_email,
+      subject: `[VDigital] Đơn ${order.code} — thông tin tài khoản của bạn`,
+      html: deliveryEmailHtml({
+        customerName: order.customer_name,
+        orderCode: order.code,
+        productName: order.items.map((i) => i.product_name).join(", "),
+        variantName: order.items.map((i) => i.variant_name).join(", "),
+        lines: emailLines,
+        guide,
+        warrantyDays: warranty,
+      }),
+    });
+  }
+  return order;
+}
+
+/** Admin giao thẻ game: điền serial + mã, mệnh giá tự lấy theo gói (cho sửa). */
+export async function deliverGameCard(
+  orderCode: string,
+  itemId: string,
+  input: { serial: string; pin: string; denomination: string; note?: string },
+): Promise<Order> {
+  const order = await getOrderByCode(orderCode);
+  if (!order) throw new Error("Không tìm thấy đơn hàng");
+  const item = order.items.find((i) => i.id === itemId);
+  if (!item) throw new Error("Không tìm thấy sản phẩm trong đơn");
+  if (item.fulfillment_type !== "game_card") throw new Error("Sản phẩm này không phải thẻ game");
+
+  item.status = "delivered";
+  item.delivered_serial = input.serial.trim();
+  item.delivered_pin = input.pin.trim();
+  item.delivered_note = input.note?.trim() || null;
+  order.status = orderStatusAfter(order);
+  await updateOrder(order);
+
+  const found = findVariant(item.variant_id);
+  await sendMail({
+    to: order.customer_email,
+    subject: `[VDigital] Đơn ${order.code} — mã thẻ ${item.product_name} của bạn`,
+    html: deliveryEmailHtml({
+      customerName: order.customer_name,
+      orderCode: order.code,
+      productName: item.product_name,
+      variantName: item.variant_name,
+      denomination: input.denomination,
+      lines: [
+        { label: "Serial thẻ", value: input.serial.trim() },
+        { label: "Mã nạp", value: input.pin.trim() },
+        { label: "Mệnh giá", value: input.denomination },
+      ],
+      guide: found?.product.guide ?? "",
+      warrantyDays: found?.product.warranty_days ?? 7,
+    }),
+  });
+  return order;
+}
+
+/** Admin hoàn thành đơn làm tay (đã add Family / nâng cấp chính chủ xong). */
+export async function completeManualItem(
+  orderCode: string,
+  itemId: string,
+  note: string,
+): Promise<Order> {
+  const order = await getOrderByCode(orderCode);
+  if (!order) throw new Error("Không tìm thấy đơn hàng");
+  const item = order.items.find((i) => i.id === itemId);
+  if (!item) throw new Error("Không tìm thấy sản phẩm trong đơn");
+
+  item.status = "delivered";
+  item.delivered_note = note.trim() || "Đã nâng cấp / thêm vào Family xong.";
+  order.status = orderStatusAfter(order);
+  await updateOrder(order);
+
+  const found = findVariant(item.variant_id);
+  await sendMail({
+    to: order.customer_email,
+    subject: `[VDigital] Đơn ${order.code} — ${item.product_name} đã hoàn thành`,
+    html: deliveryEmailHtml({
+      customerName: order.customer_name,
+      orderCode: order.code,
+      productName: item.product_name,
+      variantName: item.variant_name,
+      lines: [{ label: "Trạng thái", value: item.delivered_note }],
+      guide: found?.product.guide ?? "",
+      warrantyDays: found?.product.warranty_days ?? 30,
+    }),
+  });
+  return order;
+}
