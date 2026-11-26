@@ -168,6 +168,71 @@ async function main() {
   // 13. Guard thiếu service_role — đã kiểm ở bước 5 khi CHECK_SERVICE_ROLE_GUARD=1
   //    (tạo đơn trả lỗi rõ ràng nhắc thiếu key, không phải text RLS).
 
+  // 14. v4 — số liệu thật, không còn số seed giả.
+  // 14a. Số danh mục "Tất cả" khớp số sản phẩm thật trong catalog API.
+  //     (SSR chèn <!-- --> giữa text và số nên phải gỡ comment trước.)
+  const totalMatch = listHtml.replace(/<!-- -->/g, "").match(/Tất cả \((\d+)\)/);
+  check("v4: category 'Tất cả' count matches catalog", !!totalMatch && Number(totalMatch[1]) === catalog.products.length, `got ${totalMatch?.[1]} vs ${catalog.products.length}`);
+  // 14b. Không còn số seed giả trong HTML trang chủ: không làm tròn "3.5k",
+  //      không "Đã bán 3500/6800"; sản phẩm chưa bán hiện "Mới mở bán".
+  res = await fetch(`${BASE}/`);
+  const homeHtml = await res.text();
+  check("v4: no fake sold numbers in home HTML", !homeHtml.includes("3.5k") && !homeHtml.includes("Đã bán 3500") && !homeHtml.includes("Đã bán 6800"), "fake sold count in HTML");
+  check("v4: unsold products show 'Mới mở bán'", homeHtml.includes("Mới mở bán"), "'Mới mở bán' missing");
+  // 14c. Không còn sao giả 4.9 (dạng text ">4.9<" hoặc "4.9/5" — "4.9" trong
+  //      path SVG của icon không tính); chưa có review thì hiện "Chưa có đánh giá".
+  check("v4: no fake 4.9 rating in home HTML", !homeHtml.includes(">4.9<") && !homeHtml.includes("4.9/5"), "fake 4.9 in HTML");
+  check("v4: no reviews shows 'Chưa có đánh giá'", homeHtml.includes("Chưa có đánh giá"), "'Chưa có đánh giá' missing");
+  // 14d. Không còn khuyến mãi giả hướng khách.
+  check("v4: no fake promos (20% first order / 10.000+ customers)", !homeHtml.includes("Giảm ngay 20%") && !homeHtml.includes("Giảm 10% cho đơn đầu") && !homeHtml.includes("10.000+"), "fake promo in HTML");
+  // 14e. API đánh giá thật: chưa có review nào (demo, không Supabase).
+  res = await fetch(`${BASE}/api/reviews?productId=p-capcut`);
+  const revs = await res.json();
+  check("v4: GET /api/reviews empty when no reviews", res.ok && revs.count === 0 && Array.isArray(revs.reviews) && revs.reviews.length === 0, JSON.stringify(revs).slice(0, 150));
+  // 14f. API admin mới: không auth -> 403.
+  for (const [label, path] of [
+    ["stock", "/api/admin/stock"],
+    ["insights", "/api/admin/insights"],
+    ["email-templates", "/api/admin/email-templates"],
+  ]) {
+    res = await fetch(`${BASE}${path}`);
+    check(`v4: admin ${label} API without auth returns 403`, res.status === 403, `got ${res.status}`);
+  }
+  // 14g. Ghi lượt xem: POST /api/track luôn trả ok (kể cả khi chưa có bảng).
+  res = await fetch(`${BASE}/api/track`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: "/san-pham" }),
+  });
+  check("v4: POST /api/track returns ok", res.ok && (await res.json()).ok === true, `got ${res.status}`);
+  // 14h. Gói làm tay có manual_fields trong catalog; thiếu thông tin bắt buộc
+  //      thì tạo đơn bị từ chối 400 (validate phía server).
+  const canva = catalog.products.find((p) => p.slug === "canva-pro");
+  const canvaManual = canva?.variants.find((v) => v.fulfillment_type === "manual");
+  check("v4: manual variant has manual_fields in catalog", Array.isArray(canvaManual?.manual_fields) && canvaManual.manual_fields.length >= 1 && canvaManual.manual_fields[0].label.includes("Email"), JSON.stringify(canvaManual?.manual_fields).slice(0, 150));
+  if (canvaManual) {
+    res = await fetch(`${BASE}/api/payos/create-payment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [{ variantId: canvaManual.id, qty: 1 }],
+        customer: { name: "Test User", email: "test@example.com", phone: "0900000000" },
+      }),
+    });
+    const missing = await res.json();
+    check("v4: manual order without required info rejected (400)", res.status === 400 && typeof missing.error === "string" && missing.error.includes("Thiếu thông tin bắt buộc"), `got ${res.status} ${JSON.stringify(missing).slice(0, 150)}`);
+    res = await fetch(`${BASE}/api/payos/create-payment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [{ variantId: canvaManual.id, qty: 1, customerInfo: { "mf-email": "khach@gmail.com" } }],
+        customer: { name: "Test User", email: "test@example.com", phone: "0900000000" },
+      }),
+    });
+    const withInfo = await res.json();
+    check("v4: manual order with required info accepted", res.ok && typeof withInfo.orderCode === "string", JSON.stringify(withInfo).slice(0, 150));
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 }

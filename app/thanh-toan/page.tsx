@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock } from "lucide-react";
+import { Clock, Loader2 } from "lucide-react";
 import { useAuth, useCart, useCatalog } from "@/components/providers";
 import { formatVND } from "@/lib/format";
 import { ProductImage } from "@/components/ProductImage";
-import type { Order } from "@/lib/types";
+import type { ManualField, Order } from "@/lib/types";
 
 type PayState = "form" | "paying" | "done";
 
@@ -51,6 +51,10 @@ export default function CheckoutPage() {
   const [error, setError] = useState("");
   const [payInfo, setPayInfo] = useState<any>(null);
   const [order, setOrder] = useState<Order | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  // Thông tin khách điền theo manual_fields của từng gói làm tay —
+  // key: variantId → fieldId → giá trị.
+  const [customerInfo, setCustomerInfo] = useState<Record<string, Record<string, string>>>({});
 
   useEffect(() => {
     if (auth.user) {
@@ -83,13 +87,27 @@ export default function CheckoutPage() {
       setError("Giỏ hàng trống.");
       return;
     }
+    // Validate các ô bắt buộc theo manual_fields của từng gói làm tay.
+    for (const { variant } of lines) {
+      for (const f of variant?.manual_fields ?? []) {
+        const val = (customerInfo[variant!.id]?.[f.id] ?? "").trim();
+        if (f.required && !val) {
+          setError(`Thiếu thông tin bắt buộc: ${f.label} (${variant!.label})`);
+          return;
+        }
+        if (val && f.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+          setError(`${f.label} không đúng định dạng email.`);
+          return;
+        }
+      }
+    }
     setState("paying");
     try {
       const res = await fetch("/api/payos/create-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: cart.items.map((i) => ({ variantId: i.variantId, qty: i.qty })),
+          items: cart.items.map((i) => ({ variantId: i.variantId, qty: i.qty, customerInfo: customerInfo[i.variantId] ?? {} })),
           customer: { name: name.trim(), email: email.trim(), phone: phone.trim(), userId: null },
         }),
       });
@@ -127,20 +145,26 @@ export default function CheckoutPage() {
   }
 
   async function simulatePaid() {
-    if (!payInfo?.orderCode) return;
-    const res = await fetch("/api/payos/webhook", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ demo: true, orderCode: payInfo.orderCode }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || "Mô phỏng thanh toán thất bại");
-      return;
+    if (!payInfo?.orderCode || simulating) return;
+    setSimulating(true);
+    setError("");
+    try {
+      const res = await fetch("/api/payos/webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ demo: true, orderCode: payInfo.orderCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Mô phỏng thanh toán thất bại");
+        return;
+      }
+      setOrder(data.order);
+      cart.clear();
+      setState("done");
+    } finally {
+      setSimulating(false);
     }
-    setOrder(data.order);
-    cart.clear();
-    setState("done");
   }
 
   if (state === "done" && order) {
@@ -179,6 +203,17 @@ export default function CheckoutPage() {
                   <p className="flex items-center gap-1.5 text-sm text-amber-300 mt-2">
                     <Clock size={15} aria-hidden="true" /> Đang chờ xử lý — shop sẽ hoàn thành và gửi mail cho bạn trong 5–30 phút. Xem lại trong Đơn hàng của tôi.
                   </p>
+                )}
+                {item.customer_info && Object.entries(item.customer_info).filter(([, v]) => String(v ?? "").trim()).length > 0 && (
+                  <div className="mt-2 text-sm vd-muted space-y-0.5">
+                    {Object.entries(item.customer_info)
+                      .filter(([, v]) => String(v ?? "").trim())
+                      .map(([k, v]) => (
+                        <p key={k}>
+                          {k}: <span className="text-white">{String(v)}</span>
+                        </p>
+                      ))}
+                  </div>
                 )}
                 {item.status === "failed" && (
                   <p className="text-sm text-red-400 mt-2">
@@ -245,9 +280,11 @@ export default function CheckoutPage() {
             <p>Chủ TK: <b>{payInfo.bank.accountName}</b></p>
             <p>Nội dung: <b className="font-mono">{payInfo.content}</b></p>
           </div>
-          <button onClick={simulatePaid} className="mt-4 w-full rounded-xl bg-brand-600 hover:bg-brand-700 py-3 font-bold text-white">
-            Mô phỏng: tôi đã chuyển khoản
+          <button onClick={simulatePaid} disabled={simulating} className="mt-4 w-full rounded-xl bg-brand-600 hover:bg-brand-700 py-3 font-bold text-white disabled:opacity-50 inline-flex items-center justify-center gap-2">
+            {simulating && <Loader2 size={17} className="animate-spin" aria-hidden="true" />}
+            {simulating ? "Đang mô phỏng…" : "Mô phỏng: tôi đã chuyển khoản"}
           </button>
+          {error && <p role="alert" className="rounded-xl bg-red-500/10 border border-red-500/40 px-3 py-2.5 text-sm font-semibold text-red-400 mt-3">{error}</p>}
           <p className="text-xs vd-muted2 mt-2">Nút này gọi webhook demo để thử luồng giao hàng tự động.</p>
         </div>
       </div>
@@ -284,9 +321,53 @@ export default function CheckoutPage() {
             <p className="text-xs vd-muted">
               Với gói nâng cấp chính chủ, shop liên hệ qua email này để lấy thông tin.
             </p>
+            {/* Ô "Thông tin khách cần cung cấp" — chỉ hiện với gói làm tay
+                có manual_fields do admin cấu hình (vd email cần add Family). */}
+            {lines
+              .filter((l) => (l.variant?.manual_fields?.length ?? 0) > 0)
+              .map(({ variant, product }) => (
+                <div key={variant!.id} className="rounded-xl border vd-border p-4 space-y-3">
+                  <p className="text-sm font-bold">
+                    Thông tin cần cung cấp — {product!.name} · {variant!.label}
+                  </p>
+                  {(variant!.manual_fields ?? []).map((f: ManualField) => {
+                    const val = customerInfo[variant!.id]?.[f.id] ?? "";
+                    const setVal = (v: string) =>
+                      setCustomerInfo((prev) => ({
+                        ...prev,
+                        [variant!.id]: { ...(prev[variant!.id] ?? {}), [f.id]: v },
+                      }));
+                    const inputProps = {
+                      id: `co-mf-${variant!.id}-${f.id}`,
+                      value: val,
+                      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setVal(e.target.value),
+                      placeholder: f.placeholder || "",
+                      className: "field",
+                    };
+                    return (
+                      <div key={f.id}>
+                        <label className="field-label" htmlFor={inputProps.id}>
+                          {f.label} {f.required ? "*" : <span className="vd-muted font-normal">(tuỳ chọn)</span>}
+                        </label>
+                        {f.type === "textarea" ? (
+                          <textarea {...inputProps} rows={2} />
+                        ) : (
+                          <input
+                            {...inputProps}
+                            type={f.type === "email" ? "email" : f.type === "number" ? "text" : "text"}
+                            inputMode={f.type === "email" ? "email" : f.type === "number" ? "numeric" : undefined}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                  <p className="field-hint">Shop dùng thông tin này để xử lý đơn làm tay cho bạn.</p>
+                </div>
+              ))}
             {error && <p role="alert" className="rounded-xl bg-red-500/10 border border-red-500/40 px-3 py-2.5 text-sm font-semibold text-red-400">{error}</p>}
-            <button onClick={createPayment} className="btn-primary w-full">
-              Thanh toán VietQR — {formatVND(total)}
+            <button onClick={createPayment} disabled={state === "paying"} className="btn-primary w-full disabled:opacity-60">
+              {state === "paying" && <Loader2 size={18} className="animate-spin" aria-hidden="true" />}
+              {state === "paying" ? "Đang tạo đơn…" : `Thanh toán VietQR — ${formatVND(total)}`}
             </button>
             <p className="text-xs vd-muted2 text-center">PayOS VietQR — miễn phí, 0% phí giao dịch, tự động duyệt đơn sau khi thanh toán.</p>
           </div>

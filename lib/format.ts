@@ -2,6 +2,17 @@ export function formatVND(n: number): string {
   return new Intl.NumberFormat("vi-VN").format(Math.round(n)) + "đ";
 }
 
+/** Số lượng bán: hiện số thật chính xác, có phân tách hàng nghìn — KHÔNG làm tròn "3.5k". */
+export function formatSold(n: number): string {
+  return new Intl.NumberFormat("vi-VN").format(Math.max(0, Math.round(n)));
+}
+
+/** Điểm sao trung bình: 1 chữ số thập phân, vd "4.5". Trả "" khi chưa có đánh giá. */
+export function formatRating(rating: number, reviewCount: number): string {
+  if (!reviewCount || !rating) return "";
+  return String(Math.round(rating * 10) / 10);
+}
+
 export function discountPct(price: number, original: number): number {
   if (!original || original <= price) return 0;
   return Math.round((1 - price / original) * 100);

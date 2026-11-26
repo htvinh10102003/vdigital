@@ -6,12 +6,28 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { items, customer } = body as {
-      items: { variantId: string; qty: number }[];
+      items: { variantId: string; qty: number; customerInfo?: Record<string, string> }[];
       customer: { name: string; email: string; phone: string; userId?: string | null };
     };
     if (!items?.length) return NextResponse.json({ error: "Giỏ hàng trống" }, { status: 400 });
     if (!customer?.name || !customer?.email) {
       return NextResponse.json({ error: "Thiếu tên hoặc email khách hàng" }, { status: 400 });
+    }
+    // Validate các ô bắt buộc theo manual_fields của từng gói làm tay
+    // (server kiểm tra lại, không chỉ tin client).
+    const { getCatalog } = await import("@/lib/store");
+    const catalog = await getCatalog();
+    for (const it of items) {
+      const variant = catalog.products.flatMap((p) => p.variants).find((v) => v.id === it.variantId);
+      if (!variant) return NextResponse.json({ error: `Không tìm thấy gói ${it.variantId}` }, { status: 400 });
+      for (const f of variant.manual_fields ?? []) {
+        if (!f.required) continue;
+        const val = (it.customerInfo?.[f.id] ?? "").trim();
+        if (!val) return NextResponse.json({ error: `Thiếu thông tin bắt buộc: ${f.label}` }, { status: 400 });
+        if (f.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+          return NextResponse.json({ error: `${f.label} không đúng định dạng email` }, { status: 400 });
+        }
+      }
     }
     const order = await createOrder({
       customer_name: customer.name,

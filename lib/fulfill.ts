@@ -1,7 +1,8 @@
-import { deliveryEmailHtml, sendMail } from "./email";
+import { buildDeliveryEmail, sendMail } from "./email";
 import { findVariant } from "./seed";
 import { findVariantInCatalog, getCatalog } from "./store";
 import { getOrderByCode, takeStockCode, updateOrder } from "./store";
+import { getSupabaseServer } from "./supabase";
 import type { Order } from "./types";
 
 /**
@@ -68,21 +69,25 @@ export async function fulfillPaidOrder(order: Order): Promise<Order> {
   await updateOrder(order);
 
   // Gửi mail giao hàng cho phần đã giao tự động (nếu có). Phần làm tay sẽ
-  // gửi mail riêng khi admin hoàn thành.
+  // gửi mail riêng khi admin hoàn thành. Mẫu mail lấy từ bảng
+  // email_templates (admin chỉnh trong /admin > Mẫu email) hoặc mẫu mặc định.
   if (emailLines.length > 0) {
-    await sendMail({
-      to: order.customer_email,
-      subject: `[VDigital] Đơn ${order.code} — thông tin tài khoản của bạn`,
-      html: deliveryEmailHtml({
-        customerName: order.customer_name,
-        orderCode: order.code,
-        productName: order.items.map((i) => i.product_name).join(", "),
-        variantName: order.items.map((i) => i.variant_name).join(", "),
-        lines: emailLines,
-        guide,
-        warrantyDays: warranty,
-      }),
+    const firstDelivered = order.items.find((i) => i.status === "delivered");
+    const mail = await buildDeliveryEmail(getSupabaseServer(), {
+      type: firstDelivered?.fulfillment_type === "link" ? "link" : "auto",
+      productId: firstDelivered?.product_id ?? null,
+      customerName: order.customer_name,
+      customerEmail: order.customer_email,
+      orderCode: order.code,
+      productName: order.items.map((i) => i.product_name).join(", "),
+      variantName: order.items.map((i) => i.variant_name).join(", "),
+      lines: emailLines,
+      code: firstDelivered?.delivered_code ?? undefined,
+      deliveryLink: firstDelivered?.delivered_code ?? undefined,
+      guide,
+      warrantyDays: warranty,
     });
+    await sendMail({ to: order.customer_email, subject: mail.subject, html: mail.html });
   }
   return order;
 }
@@ -107,24 +112,26 @@ export async function deliverGameCard(
   await updateOrder(order);
 
   const found = findVariantInCatalog(await getCatalog(), item.variant_id) ?? findVariant(item.variant_id);
-  await sendMail({
-    to: order.customer_email,
-    subject: `[VDigital] Đơn ${order.code} — mã thẻ ${item.product_name} của bạn`,
-    html: deliveryEmailHtml({
-      customerName: order.customer_name,
-      orderCode: order.code,
-      productName: item.product_name,
-      variantName: item.variant_name,
-      denomination: input.denomination,
-      lines: [
-        { label: "Serial thẻ", value: input.serial.trim() },
-        { label: "Mã nạp", value: input.pin.trim() },
-        { label: "Mệnh giá", value: input.denomination },
-      ],
-      guide: found?.product.guide ?? "",
-      warrantyDays: found?.product.warranty_days ?? 7,
-    }),
+  const mail = await buildDeliveryEmail(getSupabaseServer(), {
+    type: "game_card",
+    productId: item.product_id,
+    customerName: order.customer_name,
+    customerEmail: order.customer_email,
+    orderCode: order.code,
+    productName: item.product_name,
+    variantName: item.variant_name,
+    lines: [
+      { label: "Serial thẻ", value: input.serial.trim() },
+      { label: "Mã nạp", value: input.pin.trim() },
+      { label: "Mệnh giá", value: input.denomination },
+    ],
+    serial: input.serial.trim(),
+    pin: input.pin.trim(),
+    note: input.note?.trim() || undefined,
+    guide: found?.product.guide ?? "",
+    warrantyDays: found?.product.warranty_days ?? 7,
   });
+  await sendMail({ to: order.customer_email, subject: mail.subject, html: mail.html });
   return order;
 }
 
@@ -145,18 +152,28 @@ export async function completeManualItem(
   await updateOrder(order);
 
   const found = findVariantInCatalog(await getCatalog(), item.variant_id) ?? findVariant(item.variant_id);
-  await sendMail({
-    to: order.customer_email,
-    subject: `[VDigital] Đơn ${order.code} — ${item.product_name} đã hoàn thành`,
-    html: deliveryEmailHtml({
-      customerName: order.customer_name,
-      orderCode: order.code,
-      productName: item.product_name,
-      variantName: item.variant_name,
-      lines: [{ label: "Trạng thái", value: item.delivered_note }],
-      guide: found?.product.guide ?? "",
-      warrantyDays: found?.product.warranty_days ?? 30,
-    }),
+  // Gửi kèm thông tin khách đã điền theo manual_fields (vd email cần add
+  // Family) để khách đối chiếu lại — hiện nhãn thật của ô, không hiện id.
+  const fieldLabel = new Map((found?.variant.manual_fields ?? []).map((f) => [f.id, f.label]));
+  const customerInfoLines = Object.entries(item.customer_info ?? {})
+    .filter(([, v]) => String(v ?? "").trim())
+    .map(([k, v]) => ({ label: fieldLabel.get(k) ?? k, value: String(v) }));
+  const mail = await buildDeliveryEmail(getSupabaseServer(), {
+    type: "manual",
+    productId: item.product_id,
+    customerName: order.customer_name,
+    customerEmail: order.customer_email,
+    orderCode: order.code,
+    productName: item.product_name,
+    variantName: item.variant_name,
+    lines: [
+      { label: "Trạng thái", value: item.delivered_note },
+      ...customerInfoLines,
+    ],
+    note: note.trim() || undefined,
+    guide: found?.product.guide ?? "",
+    warrantyDays: found?.product.warranty_days ?? 30,
   });
+  await sendMail({ to: order.customer_email, subject: mail.subject, html: mail.html });
   return order;
 }

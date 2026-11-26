@@ -2,12 +2,21 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { isSupabaseConfigured, useAuth, useCatalog, saveCatalogOverrides } from "@/components/providers";
 import { getSupabase } from "@/lib/supabase";
-import { formatDateTime, formatVND, slugify } from "@/lib/format";
-import type { Banner, Category, Faq, Order, Product, Variant } from "@/lib/types";
+import { formatDateTime, formatSold, formatVND, slugify } from "@/lib/format";
+import type { Banner, Category, Faq, ManualField, Order, Product, Variant } from "@/lib/types";
 import { ACCOUNT_TYPES, FULFILLMENT_TYPES, OPTION_TYPES, PRODUCT_TYPES } from "@/lib/types";
 import { ImageUpload } from "@/components/ImageUpload";
+import {
+  DEFAULT_TEMPLATES,
+  EMAIL_TEMPLATE_TYPES,
+  EMAIL_VARIABLES,
+  SAMPLE_EMAIL_VARS,
+  renderEmailTemplate,
+  type EmailTemplateType,
+} from "@/lib/email-templates";
 
 async function adminHeaders(): Promise<Record<string, string>> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
@@ -21,7 +30,17 @@ async function adminHeaders(): Promise<Record<string, string>> {
   return h;
 }
 
-type Tab = "overview" | "orders" | "products" | "stock" | "content" | "settings";
+type Tab = "overview" | "orders" | "products" | "stock" | "reports" | "content" | "emails" | "settings";
+
+const ORDER_STATUS_LABELS: Record<string, string> = {
+  pending: "Chờ thanh toán",
+  paid: "Đã thanh toán",
+  processing: "Đang xử lý",
+  completed: "Hoàn thành",
+  cancelled: "Đã hủy",
+};
+
+const LOW_STOCK_AT = 3;
 
 function newVariant(productId: string, sortOrder: number): Variant {
   return {
@@ -36,6 +55,7 @@ function newVariant(productId: string, sortOrder: number): Variant {
     option_label: null,
     delivery_template: null,
     delivery_note: null,
+    manual_fields: [],
     is_flash: false,
     flash_ends_at: null,
     stock_count: null,
@@ -55,7 +75,7 @@ function newProduct(): Product {
     description: "",
     guide: "",
     warranty_days: 30,
-    rating: 5,
+    rating: 0,
     review_count: 0,
     sold_count: 0,
     is_featured: false,
@@ -73,15 +93,78 @@ function newProduct(): Product {
   };
 }
 
+interface StockRow {
+  id: string;
+  variant_id: string;
+  product_name: string;
+  variant_name: string;
+  code: string;
+  is_used: boolean;
+  order_code: string | null;
+  is_demo: boolean;
+  created_at: string | null;
+}
+
+interface Insights {
+  summary: { revenue: number; orders: number; avgOrder: number; paidOrders: number; cancelledOrders: number };
+  byDay: { date: string; revenue: number; orders: number }[];
+  topProducts: { product_name: string; qty: number; revenue: number }[];
+  byCategory: { category: string; revenue: number }[];
+  byPayment: { method: string; count: number; revenue: number }[];
+  pageViews: { today: number; last7: number; last30: number; topPages: { path: string; views: number }[] };
+}
+
+interface SavedTemplate {
+  type: EmailTemplateType;
+  product_id: string | null;
+  subject: string;
+  body: string;
+  is_default: boolean;
+}
+
+type Msg = { tone: "ok" | "err" | "info"; text: string } | null;
+
+/** Nút thao tác có trạng thái loading: bấm thì disable + spinner, xong báo kết quả. */
+function ActionButton({
+  busy,
+  onClick,
+  className = "btn-primary !py-2.5 text-sm",
+  children,
+}: {
+  busy: boolean;
+  onClick: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button onClick={onClick} disabled={busy} className={`${className} disabled:opacity-50 disabled:cursor-wait`}>
+      {busy && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+      {children}
+    </button>
+  );
+}
+
+function StatCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
+  return (
+    <div className="vd-card p-5">
+      <div className="text-sm vd-muted">{label}</div>
+      <div className={`font-display text-2xl font-black mt-1 ${accent ?? ""}`}>{value}</div>
+      {sub && <div className="text-xs vd-muted mt-1">{sub}</div>}
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const auth = useAuth();
   const { catalog, refresh } = useCatalog();
   const [tab, setTab] = useState<Tab>("overview");
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [msg, setMsg] = useState<Msg>(null);
   const [settings, setSettings] = useState<any>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  /** busyKey: khóa nút đang chạy (vd "deliver:<itemId>", "save-product"). */
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const [gameForm, setGameForm] = useState<Record<string, { serial: string; pin: string; denomination: string; note: string }>>({});
   const [manualNote, setManualNote] = useState<Record<string, string>>({});
@@ -96,6 +179,29 @@ export default function AdminPage() {
   const [editBanners, setEditBanners] = useState<Banner[] | null>(null);
   const [editFaqs, setEditFaqs] = useState<Faq[] | null>(null);
 
+  // Kho mã: bảng mã đầy đủ
+  const [stockRows, setStockRows] = useState<StockRow[]>([]);
+  const [stockFilterVariant, setStockFilterVariant] = useState("");
+  const [stockSearch, setStockSearch] = useState("");
+  const [stockShowUsed, setStockShowUsed] = useState(true);
+
+  // Đơn hàng: lọc + tìm kiếm
+  const [orderStatus, setOrderStatus] = useState("");
+  const [orderSearch, setOrderSearch] = useState("");
+
+  // Báo cáo
+  const [reportFrom, setReportFrom] = useState(() => new Date(Date.now() - 29 * 86400_000).toISOString().slice(0, 10));
+  const [reportTo, setReportTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [insights, setInsights] = useState<Insights | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+
+  // Mẫu email
+  const [templates, setTemplates] = useState<SavedTemplate[]>([]);
+  const [tplType, setTplType] = useState<EmailTemplateType>("auto");
+  const [tplProductId, setTplProductId] = useState("");
+  const [tplSubject, setTplSubject] = useState(DEFAULT_TEMPLATES.auto.subject);
+  const [tplBody, setTplBody] = useState(DEFAULT_TEMPLATES.auto.body);
+  const [tplShowPreview, setTplShowPreview] = useState(false);
 
   async function loadOrders() {
     setLoading(true);
@@ -103,9 +209,9 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/orders", { headers: await adminHeaders() });
       const data = await res.json();
       if (res.ok) setOrders(data.orders);
-      else setMsg(data.error || "Không tải được đơn");
+      else setMsg({ tone: "err", text: data.error || "Không tải được đơn" });
     } catch {
-      setMsg("Lỗi tải đơn");
+      setMsg({ tone: "err", text: "Lỗi tải đơn" });
     } finally {
       setLoading(false);
     }
@@ -116,116 +222,292 @@ export default function AdminPage() {
     if (res.ok) setSettings(await res.json());
   }
 
+  async function loadStock() {
+    const res = await fetch("/api/admin/stock", { headers: await adminHeaders() });
+    if (res.ok) setStockRows((await res.json()).rows ?? []);
+  }
+
+  async function loadInsights(from: string, to: string) {
+    setInsightsLoading(true);
+    try {
+      const res = await fetch(`/api/admin/insights?from=${from}&to=${to}`, { headers: await adminHeaders() });
+      if (res.ok) setInsights(await res.json());
+    } finally {
+      setInsightsLoading(false);
+    }
+  }
+
+  async function loadTemplates() {
+    const res = await fetch("/api/admin/email-templates", { headers: await adminHeaders() });
+    if (res.ok) setTemplates((await res.json()).templates ?? []);
+  }
+
   useEffect(() => {
     if (auth.isAdmin) {
       loadOrders();
       loadSettings();
+      loadStock();
+      loadInsights(reportFrom, reportTo);
+      loadTemplates();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.isAdmin]);
 
+  // Số liệu thật cho Tổng quan: doanh thu chỉ tính đơn đã trả tiền trở đi.
   const stats = useMemo(() => {
     const paid = orders.filter((o) => o.status !== "pending" && o.status !== "cancelled");
     const revenue = paid.reduce((s, o) => s + o.total, 0);
     const waiting = orders.flatMap((o) => o.items).filter((i) => i.status === "waiting_manual").length;
-    return { revenue, totalOrders: orders.length, waiting };
-  }, [orders]);
+    const stockRemaining = stockRows.filter((r) => !r.is_used).length;
+    const demoCodes = stockRows.filter((r) => r.is_demo && !r.is_used).length;
+    const reviewsTotal = catalog.products.reduce((s, p) => s + p.review_count, 0);
+    return { revenue, totalOrders: orders.length, waiting, stockRemaining, demoCodes, reviewsTotal };
+  }, [orders, stockRows, catalog.products]);
+
+  // Cảnh báo kho: gói sắp hết mã (còn <= 3) — tính thật từ stock_rows.
+  const lowStock = useMemo(() => {
+    const byVariant = new Map<string, { product: string; variant: string; remaining: number }>();
+    for (const p of catalog.products) {
+      for (const v of p.variants) {
+        if (v.fulfillment_type === "auto" || v.fulfillment_type === "link") {
+          byVariant.set(v.id, { product: p.name, variant: v.label, remaining: 0 });
+        }
+      }
+    }
+    for (const r of stockRows) {
+      if (!r.is_used) {
+        const cur = byVariant.get(r.variant_id);
+        if (cur) cur.remaining += 1;
+      }
+    }
+    return [...byVariant.values()].filter((v) => v.remaining <= LOW_STOCK_AT);
+  }, [catalog.products, stockRows]);
 
   async function adminAction(action: string, orderCode: string, itemId: string, extra: Record<string, string> = {}) {
-    setMsg("");
-    const res = await fetch("/api/admin/orders", {
-      method: "POST",
-      headers: await adminHeaders(),
-      body: JSON.stringify({ action, orderCode, itemId, ...extra }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setMsg(data.error || "Thao tác thất bại");
-      return;
+    const key = `${action}:${itemId}`;
+    setBusyKey(key);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/orders", {
+        method: "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ action, orderCode, itemId, ...extra }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Thao tác thất bại — bấm lại để thử." });
+        return;
+      }
+      setMsg({ tone: "ok", text: "Đã cập nhật đơn." });
+      await loadOrders();
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
     }
-    setMsg("Đã cập nhật đơn.");
-    await loadOrders();
   }
 
   async function saveProduct() {
     if (!editProduct) return;
-    setMsg("");
-    const res = await fetch("/api/admin/settings", {
-      method: "POST",
-      headers: await adminHeaders(),
-      body: JSON.stringify({ products: [editProduct] }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setMsg(data.error || "Lưu thất bại");
-      return;
-    }
-    if (data.mode === "demo") {
-      saveCatalogOverrides({
-        products: catalog.products.map((p) => (p.id === editProduct.id ? editProduct : p)).concat(
-          catalog.products.some((p) => p.id === editProduct.id) ? [] : [editProduct],
-        ),
+    setBusyKey("save-product");
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ products: [editProduct] }),
       });
-      await refresh();
-    } else {
-      await refresh();
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Lưu thất bại — bấm lại để thử." });
+        return;
+      }
+      if (data.mode === "demo") {
+        saveCatalogOverrides({
+          products: catalog.products.map((p) => (p.id === editProduct.id ? editProduct : p)).concat(
+            catalog.products.some((p) => p.id === editProduct.id) ? [] : [editProduct],
+          ),
+        });
+        await refresh();
+      } else {
+        await refresh();
+      }
+      setMsg({ tone: "ok", text: `Đã lưu ${editProduct.name} (${data.mode}).` });
+      setEditId(null);
+      setEditProduct(null);
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
     }
-    setMsg(`Đã lưu ${editProduct.name} (${data.mode}).`);
-    setEditId(null);
-    setEditProduct(null);
   }
 
   async function saveContent() {
-    setMsg("");
-    const res = await fetch("/api/admin/settings", {
-      method: "POST",
-      headers: await adminHeaders(),
-      body: JSON.stringify({
-        categories: editCats ?? catalog.categories,
-        banners: editBanners ?? catalog.banners,
-        faqs: editFaqs ?? catalog.faqs,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setMsg(data.error || "Lưu thất bại");
-      return;
-    }
-    if (data.mode === "demo") {
-      saveCatalogOverrides({
-        categories: editCats ?? undefined,
-        banners: editBanners ?? undefined,
-        faqs: editFaqs ?? undefined,
+    setBusyKey("save-content");
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify({
+          categories: editCats ?? catalog.categories,
+          banners: editBanners ?? catalog.banners,
+          faqs: editFaqs ?? catalog.faqs,
+        }),
       });
-      await refresh();
-    } else {
-      await refresh();
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Lưu thất bại — bấm lại để thử." });
+        return;
+      }
+      if (data.mode === "demo") {
+        saveCatalogOverrides({
+          categories: editCats ?? undefined,
+          banners: editBanners ?? undefined,
+          faqs: editFaqs ?? undefined,
+        });
+        await refresh();
+      } else {
+        await refresh();
+      }
+      setMsg({ tone: "ok", text: `Đã lưu nội dung (${data.mode}).` });
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
     }
-    setMsg(`Đã lưu nội dung (${data.mode}).`);
   }
 
   async function addStock() {
-    setMsg("");
     const codes = stockCodes.split("\n").map((c) => c.trim()).filter(Boolean);
     if (!stockVariant || !codes.length) {
-      setMsg("Chọn gói và nhập ít nhất 1 mã (mỗi dòng 1 mã).");
+      setMsg({ tone: "err", text: "Chọn gói và nhập ít nhất 1 mã (mỗi dòng 1 mã)." });
       return;
     }
-    const res = await fetch("/api/admin/stock", {
-      method: "POST",
-      headers: await adminHeaders(),
-      body: JSON.stringify({ variantId: stockVariant, codes }),
-    });
-    const data = await res.json();
-    setMsg(res.ok ? `Đã thêm ${data.added} mã (${data.mode}). ${data.note ?? ""}` : data.error || "Lỗi thêm mã");
-    if (res.ok) setStockCodes("");
+    setBusyKey("add-stock");
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/stock", {
+        method: "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ variantId: stockVariant, codes }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({ tone: "ok", text: `Đã thêm ${data.added} mã (${data.mode}). ${data.note ?? ""}` });
+        setStockCodes("");
+        await loadStock();
+      } else {
+        setMsg({ tone: "err", text: data.error || "Lỗi thêm mã — bấm lại để thử." });
+      }
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function deleteStockCode(id: string, codeLabel: string) {
+    if (!confirm(`Xoá mã ${codeLabel} khỏi kho? Mã chưa dùng mới xoá được.`)) return;
+    setBusyKey(`del-stock:${id}`);
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/admin/stock?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: await adminHeaders(),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({ tone: "ok", text: `Đã xoá mã ${codeLabel}.` });
+        await loadStock();
+      } else {
+        setMsg({ tone: "err", text: data.error || "Không xoá được mã." });
+      }
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  /** Chọn mẫu email đang sửa: mẫu đã lưu thắng mẫu mặc định. */
+  function selectTemplate(type: EmailTemplateType, productId: string) {
+    setTplType(type);
+    setTplProductId(productId);
+    setTplShowPreview(false);
+    const saved = templates.find((t) => t.type === type && (t.product_id ?? "") === productId);
+    setTplSubject(saved?.subject ?? DEFAULT_TEMPLATES[type].subject);
+    setTplBody(saved?.body ?? DEFAULT_TEMPLATES[type].body);
+  }
+
+  async function saveTemplate() {
+    setBusyKey("save-template");
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/email-templates", {
+        method: "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ type: tplType, product_id: tplProductId || null, subject: tplSubject, body: tplBody }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Lưu mẫu thất bại." });
+        return;
+      }
+      setMsg({ tone: "ok", text: "Đã lưu mẫu email." });
+      await loadTemplates();
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function resetTemplate() {
+    if (!confirm("Khôi phục mẫu này về mặc định của hệ thống?")) return;
+    setBusyKey("reset-template");
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/email-templates", {
+        method: "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ action: "reset", type: tplType, product_id: tplProductId || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Khôi phục thất bại." });
+        return;
+      }
+      selectTemplate(tplType, tplProductId);
+      setMsg({ tone: "ok", text: "Đã khôi phục mẫu mặc định." });
+      await loadTemplates();
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  function exportReportCsv() {
+    if (!insights) return;
+    const lines = ["Ngay,Doanh thu (VND),So don"];
+    for (const d of insights.byDay) lines.push(`${d.date},${d.revenue},${d.orders}`);
+    lines.push("");
+    lines.push("San pham ban chay,So luong,Doanh thu (VND)");
+    for (const p of insights.topProducts) lines.push(`"${p.product_name.replace(/"/g, '""')}",${p.qty},${p.revenue}`);
+    const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `bao-cao-${reportFrom}-${reportTo}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   if (auth.loading) return <p className="mt-10 vd-muted">Đang kiểm tra quyền…</p>;
   if (!auth.user) {
     return (
       <div className="max-w-md mx-auto mt-16 text-center">
-        <h1 className="text-2xl font-black">Quản trị VDigital</h1>
+        <h1 className="font-display text-2xl font-black">Quản trị VDigital</h1>
         <p className="vd-muted mt-2">Khu vực này chỉ dành cho admin. Đăng nhập bằng email admin để tiếp tục.</p>
         {!isSupabaseConfigured && (
           <button
@@ -245,7 +527,7 @@ export default function AdminPage() {
   if (!auth.isAdmin) {
     return (
       <div className="max-w-md mx-auto mt-16 text-center">
-        <h1 className="text-2xl font-black">Không có quyền</h1>
+        <h1 className="font-display text-2xl font-black">Không có quyền</h1>
         <p className="vd-muted mt-2">
           Email {auth.user.email} không nằm trong danh sách admin. Thêm email này vào biến môi trường ADMIN_EMAILS.
         </p>
@@ -260,15 +542,66 @@ export default function AdminPage() {
   const banners = editBanners ?? catalog.banners;
   const faqs = editFaqs ?? catalog.faqs;
 
+  const filteredOrders = orders.filter((o) => {
+    if (orderStatus && o.status !== orderStatus) return false;
+    if (orderSearch.trim()) {
+      const needle = orderSearch.trim().toLowerCase();
+      const hay = `${o.code} ${o.customer_name} ${o.customer_email} ${o.customer_phone}`.toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  });
+
+  // Tóm tắt kho theo gói: tổng / đã dùng / còn lại (tính thật từ stock_rows).
+  const stockSummary = useMemo(() => {
+    const map = new Map<string, { product: string; variant: string; total: number; used: number; remaining: number; demo: number }>();
+    for (const { product, variant } of autoVariants) {
+      map.set(variant.id, { product: product.name, variant: variant.label, total: 0, used: 0, remaining: 0, demo: 0 });
+    }
+    for (const r of stockRows) {
+      const cur = map.get(r.variant_id);
+      if (!cur) continue;
+      cur.total += 1;
+      if (r.is_used) cur.used += 1;
+      else {
+        cur.remaining += 1;
+        if (r.is_demo) cur.demo += 1;
+      }
+    }
+    return [...map.values()];
+  }, [autoVariants, stockRows]);
+
+  const filteredStockRows = stockRows.filter((r) => {
+    if (stockFilterVariant && r.variant_id !== stockFilterVariant) return false;
+    if (!stockShowUsed && r.is_used) return false;
+    if (stockSearch.trim() && !r.code.toLowerCase().includes(stockSearch.trim().toLowerCase()) && !(r.order_code ?? "").toLowerCase().includes(stockSearch.trim().toLowerCase())) return false;
+    return true;
+  });
+
+  const reportMaxRevenue = Math.max(1, ...(insights?.byDay.map((d) => d.revenue) ?? [1]));
+
   return (
     <div>
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-2xl font-black tracking-tight">Quản trị VDigital</h1>
+        <h1 className="font-display text-2xl font-black tracking-tight">Quản trị VDigital</h1>
         <span className="text-xs rounded-full vd-card-flat px-3 py-1">
           {isSupabaseConfigured ? "Supabase: đã cấu hình" : "Chế độ demo — chưa cấu hình Supabase"}
         </span>
       </div>
-      {msg && <p className="mt-3 text-sm rounded-lg vd-card-flat px-3 py-2">{msg}</p>}
+      {msg && (
+        <p
+          role="status"
+          className={`mt-3 text-sm rounded-lg px-3 py-2 ${
+            msg.tone === "ok"
+              ? "bg-emerald-500/10 border border-emerald-500/40 text-emerald-300"
+              : msg.tone === "err"
+                ? "bg-red-500/10 border border-red-500/40 text-red-300"
+                : "vd-card-flat"
+          }`}
+        >
+          {msg.text}
+        </p>
+      )}
 
       <div className="flex gap-1 border-b vd-border mt-4 overflow-x-auto">
         {(
@@ -277,7 +610,9 @@ export default function AdminPage() {
             { key: "orders", label: `Đơn hàng (${orders.length})` },
             { key: "products", label: "Sản phẩm" },
             { key: "stock", label: "Kho mã" },
+            { key: "reports", label: "Báo cáo" },
             { key: "content", label: "Danh mục · Banner · FAQ" },
+            { key: "emails", label: "Mẫu email" },
             { key: "settings", label: "Cài đặt" },
           ] as { key: Tab; label: string }[]
         ).map((t) => (
@@ -292,44 +627,74 @@ export default function AdminPage() {
       </div>
 
       {tab === "overview" && (
-        <div className="grid sm:grid-cols-3 gap-4 mt-5">
-          <div className="vd-card p-5">
-            <div className="text-sm vd-muted">Doanh thu (đơn đã thanh toán)</div>
-            <div className="text-2xl font-black text-brand-400 mt-1">{formatVND(stats.revenue)}</div>
+        <div className="mt-5 space-y-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard label="Doanh thu (đơn đã thanh toán)" value={formatVND(stats.revenue)} sub={`${insights?.summary.paidOrders ?? 0} đơn đã trả tiền · TB ${formatVND(insights?.summary.avgOrder ?? 0)}/đơn`} accent="text-brand-400" />
+            <StatCard label="Tổng đơn" value={String(stats.totalOrders)} sub={`${orders.filter((o) => o.status === "pending").length} đơn chờ thanh toán`} />
+            <StatCard label="Mục chờ xử lý tay" value={String(stats.waiting)} sub="Gói làm tay + thẻ game chưa giao — xử lý ở tab Đơn hàng" accent="text-amber-400" />
+            <StatCard label="Mã còn trong kho" value={String(stats.stockRemaining)} sub={`${catalog.products.length} sản phẩm đang bán · ${stats.reviewsTotal} đánh giá`} />
           </div>
-          <div className="vd-card p-5">
-            <div className="text-sm vd-muted">Tổng đơn</div>
-            <div className="text-2xl font-black mt-1">{stats.totalOrders}</div>
+          <div className="grid sm:grid-cols-3 gap-4">
+            <StatCard label="Lượt xem hôm nay" value={String(insights?.pageViews.today ?? 0)} sub="Từ bảng page_views (tự ghi khi khách mở trang)" />
+            <StatCard label="Lượt xem 7 ngày" value={String(insights?.pageViews.last7 ?? 0)} />
+            <StatCard label="Lượt xem 30 ngày" value={String(insights?.pageViews.last30 ?? 0)} />
           </div>
-          <div className="vd-card p-5">
-            <div className="text-sm vd-muted">Mục chờ xử lý tay</div>
-            <div className="text-2xl font-black text-amber-400 mt-1">{stats.waiting}</div>
-          </div>
-          <p className="sm:col-span-3 text-sm vd-muted">
-            Đơn chờ xử lý gồm: gói làm tay (add Family / nâng cấp chính chủ) và thẻ game chưa giao mã. Xử lý trong tab Đơn hàng.
+          {(lowStock.length > 0 || stats.demoCodes > 0) && (
+            <div className="rounded-2xl border border-amber-500/50 bg-amber-500/10 p-4 text-sm space-y-1">
+              <p className="font-bold text-amber-300">Cần chú ý</p>
+              {lowStock.map((v) => (
+                <p key={v.product + v.variant}>
+                  Kho sắp hết: <b>{v.product} — {v.variant}</b> còn {v.remaining} mã. Bổ sung ở tab Kho mã.
+                </p>
+              ))}
+              {stats.demoCodes > 0 && (
+                <p>
+                  Còn <b>{stats.demoCodes} mã demo (VD-DEMO-)</b> chưa dùng trong kho — thay bằng mã thật trước khi bán.
+                </p>
+              )}
+            </div>
+          )}
+          <p className="text-sm vd-muted">
+            Doanh thu chỉ tính đơn đã trả tiền trở đi (paid / processing / completed) — đơn chờ thanh toán và đơn hủy không tính.
+            Lượt xem chỉ đếm đường dẫn trang, không lưu IP hay thông tin cá nhân.
           </p>
         </div>
       )}
 
       {tab === "orders" && (
         <div className="mt-5 space-y-3">
-          <button onClick={loadOrders} className="btn-outline !py-2 text-sm">
-            {loading ? "Đang tải…" : "Tải lại đơn"}
-          </button>
-          {orders.length === 0 && <p className="vd-muted">Chưa có đơn hàng nào.</p>}
-          {orders.map((o) => (
+          <div className="flex flex-wrap gap-2 items-center">
+            <select value={orderStatus} onChange={(e) => setOrderStatus(e.target.value)} className="field !w-auto" aria-label="Lọc theo trạng thái">
+              <option value="">Tất cả trạng thái</option>
+              {Object.entries(ORDER_STATUS_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+            <input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Tìm mã đơn / tên / email / SĐT…" className="field !w-64" />
+            <ActionButton busy={loading} onClick={loadOrders} className="btn-outline !py-2 text-sm">
+              {loading ? "Đang tải…" : "Tải lại đơn"}
+            </ActionButton>
+            <span className="text-sm vd-muted">{filteredOrders.length} đơn</span>
+          </div>
+          {filteredOrders.length === 0 && <p className="vd-muted">Không có đơn nào khớp bộ lọc.</p>}
+          {filteredOrders.map((o) => (
             <div key={o.id} className="vd-card p-4">
               <button className="w-full flex flex-wrap justify-between gap-2 text-left" onClick={() => setExpanded(expanded === o.id ? null : o.id)}>
                 <span className="font-mono font-bold">{o.code}</span>
                 <span className="text-sm vd-muted">{o.customer_name} — {o.customer_email}</span>
                 <span className="text-sm">{formatDateTime(o.created_at)}</span>
                 <b className="text-brand-400">{formatVND(o.total)}</b>
-                <span className="text-xs rounded-full vd-surface2 px-2 py-1">{o.status}</span>
+                <span className="text-xs rounded-full vd-surface2 px-2 py-1">{ORDER_STATUS_LABELS[o.status] ?? o.status}</span>
               </button>
               {expanded === o.id && (
                 <div className="mt-3 space-y-3 border-t vd-border pt-3">
+                  <p className="text-sm vd-muted">
+                    Khách: {o.customer_name} · {o.customer_email} · {o.customer_phone || "—"} · Thanh toán: {o.payment_method === "manual-bank" ? "Chuyển khoản ngân hàng" : "VietQR (PayOS)"}
+                  </p>
                   {o.items.map((item) => {
                     const gf = gameForm[item.id] ?? { serial: "", pin: "", denomination: item.variant_name, note: "" };
+                    const variant = catalog.products.flatMap((p) => p.variants).find((v) => v.id === item.variant_id);
+                    const fieldLabel = new Map((variant?.manual_fields ?? []).map((f) => [f.id, f.label]));
                     return (
                       <div key={item.id} className="vd-card-flat p-3 text-sm">
                         <div className="flex flex-wrap justify-between gap-2">
@@ -340,6 +705,18 @@ export default function AdminPage() {
                         {item.delivered_code && <p className="mt-1">Mã đã giao: <code className="font-mono vd-surface2 px-2 py-0.5 rounded">{item.delivered_code}</code></p>}
                         {item.delivered_serial && <p className="mt-1">Serial: <code className="font-mono">{item.delivered_serial}</code> · Mã: <code className="font-mono">{item.delivered_pin}</code></p>}
                         {item.delivered_note && <p className="mt-1 vd-muted">{item.delivered_note}</p>}
+                        {item.customer_info && Object.entries(item.customer_info).filter(([, v]) => String(v ?? "").trim()).length > 0 && (
+                          <div className="mt-2 rounded-lg vd-surface2 p-3">
+                            <p className="font-semibold text-xs uppercase tracking-wide vd-muted">Thông tin khách đã cung cấp (xử lý tay)</p>
+                            {Object.entries(item.customer_info)
+                              .filter(([, v]) => String(v ?? "").trim())
+                              .map(([k, v]) => (
+                                <p key={k} className="mt-1">
+                                  {fieldLabel.get(k) ?? k}: <b>{String(v)}</b>
+                                </p>
+                              ))}
+                          </div>
+                        )}
 
                         {item.status === "waiting_manual" && item.fulfillment_type === "game_card" && (
                           <div className="mt-3 grid sm:grid-cols-2 gap-2">
@@ -347,9 +724,13 @@ export default function AdminPage() {
                             <input value={gf.pin} onChange={(e) => setGameForm({ ...gameForm, [item.id]: { ...gf, pin: e.target.value } })} placeholder="Mã nạp (code/pin) *" className="field" />
                             <input value={gf.denomination} onChange={(e) => setGameForm({ ...gameForm, [item.id]: { ...gf, denomination: e.target.value } })} placeholder="Mệnh giá (tự theo gói, sửa được)" className="field" />
                             <input value={gf.note} onChange={(e) => setGameForm({ ...gameForm, [item.id]: { ...gf, note: e.target.value } })} placeholder="Ghi chú cho khách (tuỳ chọn)" className="field" />
-                            <button onClick={() => adminAction("deliver-game-card", o.code, item.id, gf)} className="btn-primary sm:col-span-2 !py-2.5 text-sm">
-                              Giao + gửi mail cho khách
-                            </button>
+                            <ActionButton
+                              busy={busyKey === `deliver-game-card:${item.id}`}
+                              onClick={() => adminAction("deliver-game-card", o.code, item.id, gf)}
+                              className="btn-primary sm:col-span-2 !py-2.5 text-sm"
+                            >
+                              {busyKey === `deliver-game-card:${item.id}` ? "Đang giao…" : "Giao + gửi mail cho khách"}
+                            </ActionButton>
                             <p className="sm:col-span-2 text-xs vd-muted2">Mệnh giá tự điền theo gói đã mua — sửa lại nếu thẻ thực tế khác mệnh giá gói.</p>
                           </div>
                         )}
@@ -357,9 +738,13 @@ export default function AdminPage() {
                         {item.status === "waiting_manual" && item.fulfillment_type === "manual" && (
                           <div className="mt-3 flex gap-2">
                             <input value={manualNote[item.id] ?? ""} onChange={(e) => setManualNote({ ...manualNote, [item.id]: e.target.value })} placeholder="Ghi chú hoàn thành (vd: đã thêm vào Family xong)" className="field flex-1" />
-                            <button onClick={() => adminAction("complete-manual", o.code, item.id, { note: manualNote[item.id] ?? "" })} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-4 py-2 font-semibold text-white">
-                              Hoàn thành
-                            </button>
+                            <ActionButton
+                              busy={busyKey === `complete-manual:${item.id}`}
+                              onClick={() => adminAction("complete-manual", o.code, item.id, { note: manualNote[item.id] ?? "" })}
+                              className="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-4 py-2 font-semibold text-white disabled:opacity-50 disabled:cursor-wait"
+                            >
+                              {busyKey === `complete-manual:${item.id}` ? "Đang lưu…" : "Hoàn thành"}
+                            </ActionButton>
                           </div>
                         )}
                       </div>
@@ -373,7 +758,7 @@ export default function AdminPage() {
       )}
 
       {tab === "products" && (
-        <div className="mt-5 grid lg:grid-cols-[280px_1fr] gap-5 items-start">
+        <div className="mt-5 grid lg:grid-cols-[300px_1fr] gap-5 items-start">
           <div className="space-y-2">
             <button
               onClick={() => {
@@ -395,7 +780,10 @@ export default function AdminPage() {
                 className={`block w-full text-left rounded-xl border px-3 py-2.5 text-sm ${editId === p.id ? "border-brand-500 bg-brand-500/10" : "vd-border vd-card-flat"}`}
               >
                 <b>{p.name}</b>
-                <span className="block text-xs vd-muted">{p.variants.length} gói · đã bán {p.sold_count} · {p.is_active ? "đang bán" : "đã ẩn"}</span>
+                <span className="block text-xs vd-muted">
+                  {p.variants.length} gói · đã bán {formatSold(p.sold_count)}
+                  {p.review_count > 0 ? ` · ★ ${p.rating} (${p.review_count})` : " · chưa có đánh giá"} · {p.is_active ? "đang bán" : "đã ẩn"}
+                </span>
               </button>
             ))}
           </div>
@@ -404,7 +792,7 @@ export default function AdminPage() {
               <p className="vd-muted">Chọn sản phẩm bên trái để sửa — hoặc bấm “Thêm sản phẩm mới” để tạo sản phẩm không cần sửa code.</p>
             ) : (
               <div className="vd-card p-4 space-y-4">
-                <h3 className="font-bold text-lg">Sửa: {editProduct.name}</h3>
+                <h3 className="font-display font-bold text-lg">Sửa: {editProduct.name}</h3>
                 <div className="grid sm:grid-cols-2 gap-3">
                   <label className="block">
                     <span className="field-label">Tên sản phẩm *</span>
@@ -537,6 +925,60 @@ export default function AdminPage() {
                           <span className="field-label">Ghi chú giao hàng cho gói này</span>
                           <input value={v.delivery_note ?? ""} onChange={(e) => setV({ delivery_note: e.target.value || null })} className="field" placeholder="vd: Dùng email của bạn để nhận lời mời Family" />
                         </label>
+                        {/* Thông tin khách cần cung cấp — chỉ cho gói làm tay. */}
+                        {v.fulfillment_type === "manual" && (
+                          <div className="rounded-xl border vd-border p-3 space-y-2">
+                            <p className="font-semibold text-sm">Thông tin khách cần cung cấp <span className="vd-muted font-normal">(hiện ở trang thanh toán khi mua gói này)</span></p>
+                            {(v.manual_fields ?? []).map((f: ManualField, fi: number) => {
+                              const setF = (patch: Partial<ManualField>) => {
+                                const fields = [...(v.manual_fields ?? [])];
+                                fields[fi] = { ...f, ...patch };
+                                setV({ manual_fields: fields });
+                              };
+                              return (
+                                <div key={f.id} className="grid grid-cols-1 sm:grid-cols-[1fr_130px_auto_auto] gap-2 items-end">
+                                  <label className="block">
+                                    <span className="field-label">Nhãn ô *</span>
+                                    <input value={f.label} onChange={(e) => setF({ label: e.target.value })} className="field" placeholder="vd: Email cần add vào Family" />
+                                  </label>
+                                  <label className="block">
+                                    <span className="field-label">Loại</span>
+                                    <select value={f.type} onChange={(e) => setF({ type: e.target.value as ManualField["type"] })} className="field">
+                                      <option value="text">Chữ</option>
+                                      <option value="email">Email</option>
+                                      <option value="number">Số</option>
+                                      <option value="textarea">Đoạn dài</option>
+                                    </select>
+                                  </label>
+                                  <label className="flex items-center gap-2 text-sm pb-2.5">
+                                    <input type="checkbox" checked={f.required} onChange={(e) => setF({ required: e.target.checked })} className="accent-violet-600" /> Bắt buộc
+                                  </label>
+                                  <button type="button" onClick={() => setV({ manual_fields: (v.manual_fields ?? []).filter((x) => x.id !== f.id) })} className="text-sm text-red-400 hover:underline pb-2.5">
+                                    Xoá
+                                  </button>
+                                  <label className="block sm:col-span-4">
+                                    <span className="field-label">Gợi ý (placeholder)</span>
+                                    <input value={f.placeholder ?? ""} onChange={(e) => setF({ placeholder: e.target.value })} className="field" placeholder="vd: ban@gmail.com" />
+                                  </label>
+                                </div>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setV({
+                                  manual_fields: [
+                                    ...(v.manual_fields ?? []),
+                                    { id: `mf-${Date.now()}`, label: "", type: "text", required: true, placeholder: "" },
+                                  ],
+                                })
+                              }
+                              className="btn-outline !py-1.5 text-xs"
+                            >
+                              + Thêm ô thông tin
+                            </button>
+                          </div>
+                        )}
                         <div className="flex flex-wrap items-center gap-4 text-sm">
                           <label className="flex items-center gap-2"><input type="checkbox" checked={v.is_flash} onChange={(e) => setV({ is_flash: e.target.checked })} className="accent-violet-600" /> Flash Sale</label>
                           <label className="flex items-center gap-2"><input type="checkbox" checked={v.is_active} onChange={(e) => setV({ is_active: e.target.checked })} className="accent-violet-600" /> Đang bán</label>
@@ -560,7 +1002,9 @@ export default function AdminPage() {
                   + Thêm gói
                 </button>
                 <div className="flex gap-2 pt-1">
-                  <button onClick={saveProduct} className="btn-primary !py-2.5 text-sm">Lưu sản phẩm</button>
+                  <ActionButton busy={busyKey === "save-product"} onClick={saveProduct}>
+                    {busyKey === "save-product" ? "Đang lưu…" : "Lưu sản phẩm"}
+                  </ActionButton>
                   <button onClick={() => { setEditId(null); setEditProduct(null); }} className="btn-outline !py-2.5 text-sm">Huỷ</button>
                 </div>
               </div>
@@ -570,32 +1014,281 @@ export default function AdminPage() {
       )}
 
       {tab === "stock" && (
-        <div className="mt-5 max-w-2xl space-y-3">
-          <p className="text-sm vd-muted">
-            Kho mã dùng cho các gói giao tự động (auto). Khi khách thanh toán, hệ thống lấy mã cũ nhất chưa dùng để giao.
-            Mã demo trong seed có tiền tố VD-DEMO — thay bằng mã thật trước khi bán.
-          </p>
-          <label className="block">
-            <span className="field-label">Chọn gói giao tự động / link</span>
-            <select value={stockVariant} onChange={(e) => setStockVariant(e.target.value)} className="field">
-              <option value="">— Chọn gói —</option>
-              {autoVariants.map(({ product, variant }) => (
-                <option key={variant.id} value={variant.id}>{product.name} — {variant.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="field-label">Danh sách mã (mỗi dòng 1 mã)</span>
-            <textarea rows={8} value={stockCodes} onChange={(e) => setStockCodes(e.target.value)} placeholder={"VD-XXXX-0001\nVD-XXXX-0002"} className="field font-mono" />
-          </label>
-          <button onClick={addStock} className="btn-primary !py-2.5 text-sm">Thêm vào kho</button>
+        <div className="mt-5 space-y-5">
+          <div className="vd-card p-4">
+            <h3 className="font-display font-bold">Tóm tắt kho theo gói</h3>
+            <p className="text-xs vd-muted mt-1">Tính thật từ bảng stock_codes (tổng / đã giao / còn lại). Gói còn ≤ {LOW_STOCK_AT} mã được tô vàng.</p>
+            <div className="overflow-x-auto mt-3">
+              <table className="w-full text-sm text-left">
+                <thead>
+                  <tr className="border-b vd-border vd-muted">
+                    <th className="py-2 pr-3 font-semibold">Gói</th>
+                    <th className="py-2 pr-3 font-semibold text-right">Tổng</th>
+                    <th className="py-2 pr-3 font-semibold text-right">Đã giao</th>
+                    <th className="py-2 pr-3 font-semibold text-right">Còn lại</th>
+                    <th className="py-2 font-semibold">Ghi chú</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stockSummary.map((s) => (
+                    <tr key={s.product + s.variant} className="border-b vd-border last:border-b-0">
+                      <td className="py-2 pr-3 font-semibold">{s.product} — {s.variant}</td>
+                      <td className="py-2 pr-3 text-right">{s.total}</td>
+                      <td className="py-2 pr-3 text-right">{s.used}</td>
+                      <td className={`py-2 pr-3 text-right font-bold ${s.remaining <= LOW_STOCK_AT ? "text-amber-400" : "text-emerald-400"}`}>{s.remaining}</td>
+                      <td className="py-2 text-xs vd-muted">
+                        {s.remaining <= LOW_STOCK_AT ? "Sắp hết mã — bổ sung ngay" : ""}
+                        {s.demo > 0 ? ` Còn ${s.demo} mã demo` : ""}
+                      </td>
+                    </tr>
+                  ))}
+                  {stockSummary.length === 0 && (
+                    <tr><td colSpan={5} className="py-4 vd-muted">Chưa có gói giao tự động nào.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="vd-card p-4">
+            <h3 className="font-display font-bold">Thêm mã vào kho</h3>
+            <p className="text-sm vd-muted mt-1">
+              Kho mã dùng cho các gói giao tự động (auto). Khi khách thanh toán, hệ thống lấy mã cũ nhất chưa dùng để giao.
+              Mã demo trong seed có tiền tố VD-DEMO — thay bằng mã thật trước khi bán.
+            </p>
+            <div className="grid md:grid-cols-2 gap-3 mt-3">
+              <label className="block">
+                <span className="field-label">Chọn gói giao tự động / link</span>
+                <select value={stockVariant} onChange={(e) => setStockVariant(e.target.value)} className="field">
+                  <option value="">— Chọn gói —</option>
+                  {autoVariants.map(({ product, variant }) => (
+                    <option key={variant.id} value={variant.id}>{product.name} — {variant.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="field-label">Danh sách mã (mỗi dòng 1 mã)</span>
+                <textarea rows={4} value={stockCodes} onChange={(e) => setStockCodes(e.target.value)} placeholder={"VD-XXXX-0001\nVD-XXXX-0002"} className="field font-mono" />
+              </label>
+            </div>
+            <div className="flex items-center gap-3 mt-3">
+              <ActionButton busy={busyKey === "add-stock"} onClick={addStock}>
+                {busyKey === "add-stock" ? "Đang thêm…" : "Thêm vào kho"}
+              </ActionButton>
+              {stockCodes.trim() && (
+                <span className="text-sm vd-muted">Sẽ thêm {stockCodes.split("\n").map((c) => c.trim()).filter(Boolean).length} mã.</span>
+              )}
+            </div>
+          </div>
+
+          <div className="vd-card p-4">
+            <h3 className="font-display font-bold">Danh sách mã</h3>
+            <p className="text-xs vd-muted mt-1">Mã đã giao chỉ hiện dạng che + mã đơn — không hiện nguyên mã để tránh lộ.</p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <select value={stockFilterVariant} onChange={(e) => setStockFilterVariant(e.target.value)} className="field !w-auto" aria-label="Lọc theo gói">
+                <option value="">Tất cả gói</option>
+                {autoVariants.map(({ product, variant }) => (
+                  <option key={variant.id} value={variant.id}>{product.name} — {variant.label}</option>
+                ))}
+              </select>
+              <input value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="Tìm mã / mã đơn…" className="field !w-56" />
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={stockShowUsed} onChange={(e) => setStockShowUsed(e.target.checked)} className="accent-violet-600" />
+                Hiện mã đã giao
+              </label>
+              <span className="text-sm vd-muted ml-auto">{filteredStockRows.length} mã</span>
+            </div>
+            <div className="overflow-x-auto mt-3 max-h-[480px] overflow-y-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="sticky top-0" style={{ background: "var(--surface)" }}>
+                  <tr className="border-b vd-border vd-muted">
+                    <th className="py-2 pr-3 font-semibold">Mã</th>
+                    <th className="py-2 pr-3 font-semibold">Gói</th>
+                    <th className="py-2 pr-3 font-semibold">Trạng thái</th>
+                    <th className="py-2 pr-3 font-semibold">Đơn</th>
+                    <th className="py-2 font-semibold" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredStockRows.slice(0, 300).map((r) => (
+                    <tr key={r.id} className="border-b vd-border last:border-b-0">
+                      <td className="py-2 pr-3 font-mono text-xs break-all">
+                        {r.code}
+                        {r.is_demo && !r.is_used && <span className="ml-2 rounded bg-amber-500/20 text-amber-300 px-1.5 py-0.5 text-[10px] font-bold">DEMO</span>}
+                      </td>
+                      <td className="py-2 pr-3">{r.product_name} — {r.variant_name}</td>
+                      <td className="py-2 pr-3">
+                        {r.is_used ? <span className="text-slate-400">Đã giao</span> : <span className="text-emerald-400 font-semibold">Chưa dùng</span>}
+                      </td>
+                      <td className="py-2 pr-3 font-mono text-xs">{r.order_code ?? "—"}</td>
+                      <td className="py-2 text-right">
+                        {!r.is_used && (
+                          <button
+                            onClick={() => deleteStockCode(r.id, r.code)}
+                            disabled={busyKey === `del-stock:${r.id}`}
+                            className="text-sm text-red-400 hover:underline disabled:opacity-50"
+                          >
+                            {busyKey === `del-stock:${r.id}` ? "Đang xoá…" : "Xoá"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredStockRows.length === 0 && (
+                    <tr><td colSpan={5} className="py-4 vd-muted">Không có mã nào khớp bộ lọc.</td></tr>
+                  )}
+                </tbody>
+              </table>
+              {filteredStockRows.length > 300 && (
+                <p className="text-xs vd-muted mt-2">Đang hiện 300/{filteredStockRows.length} mã — thu hẹp bộ lọc để xem hết.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "reports" && (
+        <div className="mt-5 space-y-5">
+          <div className="vd-card p-4 flex flex-wrap gap-2 items-end">
+            <div>
+              <span className="field-label">Từ ngày</span>
+              <input type="date" value={reportFrom} onChange={(e) => setReportFrom(e.target.value)} className="field !w-auto" />
+            </div>
+            <div>
+              <span className="field-label">Đến ngày</span>
+              <input type="date" value={reportTo} onChange={(e) => setReportTo(e.target.value)} className="field !w-auto" />
+            </div>
+            <ActionButton busy={insightsLoading} onClick={() => loadInsights(reportFrom, reportTo)} className="btn-outline !py-2.5 text-sm">
+              {insightsLoading ? "Đang tải…" : "Xem báo cáo"}
+            </ActionButton>
+            {[
+              { label: "7 ngày", days: 7 },
+              { label: "30 ngày", days: 30 },
+              { label: "90 ngày", days: 90 },
+            ].map((p) => (
+              <button
+                key={p.label}
+                onClick={() => {
+                  const to = new Date().toISOString().slice(0, 10);
+                  const from = new Date(Date.now() - (p.days - 1) * 86400_000).toISOString().slice(0, 10);
+                  setReportFrom(from);
+                  setReportTo(to);
+                  loadInsights(from, to);
+                }}
+                className="btn-outline !py-2.5 text-sm"
+              >
+                {p.label}
+              </button>
+            ))}
+            <button onClick={exportReportCsv} disabled={!insights} className="btn-primary !py-2.5 text-sm disabled:opacity-40">
+              Xuất Excel / CSV
+            </button>
+          </div>
+
+          {!insights ? (
+            <p className="vd-muted">Đang tải báo cáo…</p>
+          ) : (
+            <>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard label="Doanh thu" value={formatVND(insights.summary.revenue)} sub={`${insights.summary.paidOrders} đơn đã trả tiền`} accent="text-brand-400" />
+                <StatCard label="Tổng đơn" value={String(insights.summary.orders)} sub={`${insights.summary.cancelledOrders} đơn hủy`} />
+                <StatCard label="Đơn trung bình" value={formatVND(insights.summary.avgOrder)} />
+                <StatCard label="Lượt xem (30 ngày)" value={String(insights.pageViews.last30)} sub={`Hôm nay: ${insights.pageViews.today}`} />
+              </div>
+
+              <div className="vd-card p-4">
+                <h3 className="font-display font-bold">Doanh thu theo ngày</h3>
+                <div className="mt-4 flex items-end gap-1 h-40">
+                  {insights.byDay.map((d) => (
+                    <div key={d.date} className="flex-1 flex flex-col items-center gap-1 min-w-0" title={`${d.date}: ${formatVND(d.revenue)} · ${d.orders} đơn`}>
+                      <div
+                        className="w-full max-w-6 rounded-t bg-brand-600"
+                        style={{ height: `${Math.max(d.revenue > 0 ? 4 : 0, (d.revenue / reportMaxRevenue) * 140)}px` }}
+                      />
+                      <span className="text-[9px] vd-muted2 truncate">{d.date.slice(5)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs vd-muted mt-2">Rê chuột vào cột để xem doanh thu từng ngày. Ngày không có đơn thì cột bằng 0.</p>
+              </div>
+
+              <div className="grid lg:grid-cols-2 gap-4">
+                <div className="vd-card p-4">
+                  <h3 className="font-display font-bold">Top sản phẩm bán chạy</h3>
+                  {insights.topProducts.length === 0 ? (
+                    <p className="text-sm vd-muted mt-2">Chưa có đơn đã thanh toán trong khoảng này.</p>
+                  ) : (
+                    <table className="w-full text-sm text-left mt-2">
+                      <thead>
+                        <tr className="border-b vd-border vd-muted">
+                          <th className="py-2 pr-3 font-semibold">Sản phẩm</th>
+                          <th className="py-2 pr-3 font-semibold text-right">SL</th>
+                          <th className="py-2 font-semibold text-right">Doanh thu</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {insights.topProducts.map((p) => (
+                          <tr key={p.product_name} className="border-b vd-border last:border-b-0">
+                            <td className="py-2 pr-3 font-semibold">{p.product_name}</td>
+                            <td className="py-2 pr-3 text-right">{p.qty}</td>
+                            <td className="py-2 text-right">{formatVND(p.revenue)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <div className="space-y-4">
+                  <div className="vd-card p-4">
+                    <h3 className="font-display font-bold">Doanh thu theo danh mục</h3>
+                    {insights.byCategory.length === 0 ? (
+                      <p className="text-sm vd-muted mt-2">Chưa có dữ liệu.</p>
+                    ) : (
+                      insights.byCategory.map((c) => (
+                        <div key={c.category} className="flex justify-between text-sm mt-2">
+                          <span>{c.category}</span>
+                          <b>{formatVND(c.revenue)}</b>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="vd-card p-4">
+                    <h3 className="font-display font-bold">Doanh thu theo phương thức thanh toán</h3>
+                    {insights.byPayment.length === 0 ? (
+                      <p className="text-sm vd-muted mt-2">Chưa có dữ liệu.</p>
+                    ) : (
+                      insights.byPayment.map((p) => (
+                        <div key={p.method} className="flex justify-between text-sm mt-2">
+                          <span>{p.method} ({p.count} đơn)</span>
+                          <b>{formatVND(p.revenue)}</b>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="vd-card p-4">
+                    <h3 className="font-display font-bold">Trang xem nhiều nhất (30 ngày)</h3>
+                    {insights.pageViews.topPages.length === 0 ? (
+                      <p className="text-sm vd-muted mt-2">Chưa ghi nhận lượt xem nào — cần chạy migration 006 để tạo bảng page_views.</p>
+                    ) : (
+                      insights.pageViews.topPages.map((p) => (
+                        <div key={p.path} className="flex justify-between text-sm mt-2">
+                          <span className="font-mono text-xs break-all">{p.path}</span>
+                          <b>{p.views} lượt</b>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
       {tab === "content" && (
         <div className="mt-5 space-y-6">
           <div className="vd-card p-4">
-            <h3 className="font-bold">Danh mục</h3>
+            <h3 className="font-display font-bold">Danh mục</h3>
             <p className="text-xs vd-muted mt-1">Icon: nhập tên icon Lucide (vd: KeyRound, Gamepad2) hoặc để trống. Ảnh: up ảnh đại diện cho danh mục.</p>
             <div className="space-y-3 mt-3">
               {cats.map((c, i) => (
@@ -612,7 +1305,7 @@ export default function AdminPage() {
             </div>
           </div>
           <div className="vd-card p-4">
-            <h3 className="font-bold">Banner trang chủ</h3>
+            <h3 className="font-display font-bold">Banner trang chủ</h3>
             <div className="space-y-3 mt-3">
               {banners.map((b, i) => (
                 <div key={b.id} className="vd-card-flat p-3 space-y-2">
@@ -629,7 +1322,7 @@ export default function AdminPage() {
             </div>
           </div>
           <div className="vd-card p-4">
-            <h3 className="font-bold">Câu hỏi thường gặp (FAQ)</h3>
+            <h3 className="font-display font-bold">Câu hỏi thường gặp (FAQ)</h3>
             <div className="space-y-3 mt-3">
               {faqs.map((f, i) => (
                 <div key={f.id} className="vd-card-flat p-3 space-y-2">
@@ -639,7 +1332,94 @@ export default function AdminPage() {
               ))}
             </div>
           </div>
-          <button onClick={saveContent} className="btn-primary !py-2.5 text-sm">Lưu danh mục / banner / FAQ</button>
+          <ActionButton busy={busyKey === "save-content"} onClick={saveContent}>
+            {busyKey === "save-content" ? "Đang lưu…" : "Lưu danh mục / banner / FAQ"}
+          </ActionButton>
+        </div>
+      )}
+
+      {tab === "emails" && (
+        <div className="mt-5 space-y-5">
+          <div className="vd-card p-4">
+            <h3 className="font-display font-bold">Mẫu email giao hàng</h3>
+            <p className="text-sm vd-muted mt-1">
+              Chỉnh tiêu đề + nội dung mail theo từng loại giao hàng. Mẫu riêng của sản phẩm thắng mẫu chung của loại.
+              Bấm vào biến để chèn vào nội dung (con trỏ sẽ thêm vào cuối).
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3 mt-3">
+              <label className="block">
+                <span className="field-label">Loại giao hàng</span>
+                <select value={tplType} onChange={(e) => selectTemplate(e.target.value as EmailTemplateType, tplProductId)} className="field">
+                  {EMAIL_TEMPLATE_TYPES.map((t) => (
+                    <option key={t.type} value={t.type}>{t.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="field-label">Áp dụng cho</span>
+                <select value={tplProductId} onChange={(e) => selectTemplate(tplType, e.target.value)} className="field">
+                  <option value="">— Tất cả sản phẩm (mẫu chung) —</option>
+                  {catalog.products.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {EMAIL_VARIABLES.map((v) => (
+                <button key={v} onClick={() => setTplBody((b) => b + ` ${v}`)} className="chip !py-1 !px-2.5 text-xs font-mono" title={`Chèn biến ${v}`}>
+                  {v}
+                </button>
+              ))}
+            </div>
+            <label className="block mt-3">
+              <span className="field-label">Tiêu đề email</span>
+              <input value={tplSubject} onChange={(e) => setTplSubject(e.target.value)} className="field" />
+            </label>
+            <label className="block mt-3">
+              <span className="field-label">Nội dung email</span>
+              <textarea rows={12} value={tplBody} onChange={(e) => setTplBody(e.target.value)} className="field font-mono text-sm" />
+            </label>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <ActionButton busy={busyKey === "save-template"} onClick={saveTemplate}>
+                {busyKey === "save-template" ? "Đang lưu…" : "Lưu mẫu"}
+              </ActionButton>
+              <button onClick={() => setTplShowPreview((v) => !v)} className="btn-outline !py-2.5 text-sm">
+                {tplShowPreview ? "Ẩn xem trước" : "Xem trước với dữ liệu mẫu"}
+              </button>
+              <ActionButton busy={busyKey === "reset-template"} onClick={resetTemplate} className="btn-outline !py-2.5 text-sm">
+                {busyKey === "reset-template" ? "Đang khôi phục…" : "Khôi phục mẫu mặc định"}
+              </ActionButton>
+            </div>
+            {tplShowPreview && (
+              <div className="mt-4 rounded-xl border vd-border p-4 text-sm">
+                <p className="font-bold">Xem trước — dữ liệu mẫu</p>
+                <p className="mt-2"><b>Tiêu đề:</b> {renderEmailTemplate(tplSubject, SAMPLE_EMAIL_VARS)}</p>
+                <div className="mt-2 whitespace-pre-line leading-relaxed">
+                  {renderEmailTemplate(tplBody, SAMPLE_EMAIL_VARS)}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="vd-card p-4">
+            <h3 className="font-display font-bold">Mẫu đã lưu</h3>
+            {templates.filter((t) => !t.is_default).length === 0 ? (
+              <p className="text-sm vd-muted mt-2">Chưa lưu mẫu riêng nào — đang dùng mẫu mặc định của hệ thống.</p>
+            ) : (
+              <ul className="mt-2 space-y-1 text-sm">
+                {templates.filter((t) => !t.is_default).map((t) => (
+                  <li key={`${t.type}-${t.product_id ?? "all"}`}>
+                    <button
+                      className="text-brand-400 hover:underline"
+                      onClick={() => selectTemplate(t.type, t.product_id ?? "")}
+                    >
+                      {EMAIL_TEMPLATE_TYPES.find((x) => x.type === t.type)?.label} — {t.product_id ? catalog.products.find((p) => p.id === t.product_id)?.name ?? t.product_id : "Tất cả sản phẩm"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
 
@@ -649,8 +1429,6 @@ export default function AdminPage() {
             <p className="vd-muted">Đang tải cài đặt…</p>
           ) : (
             <>
-              {/* Cảnh báo nổi bật: thiếu service_role thì đơn không lưu được
-                  (lỗi "permission denied for table orders") — xem README mục 7. */}
               {settings.supabase &&
                 settings.env?.find((e: { name: string }) => e.name.includes("SERVICE_ROLE"))?.configured === false && (
                   <div role="alert" className="rounded-2xl border border-red-500/50 bg-red-500/10 p-4">
@@ -663,7 +1441,7 @@ export default function AdminPage() {
                   </div>
                 )}
               <div className="vd-card p-5">
-                <h3 className="font-bold">Trạng thái cấu hình</h3>
+                <h3 className="font-display font-bold">Trạng thái cấu hình</h3>
                 <p className="text-xs vd-muted mt-1">
                   {settings.supabase
                     ? `Supabase đã cấu hình (URL từ ${settings.supabaseSources?.urlFrom ?? "?"}, key từ ${settings.supabaseSources?.keyFrom ?? "?"}).`
@@ -694,7 +1472,7 @@ export default function AdminPage() {
                 </p>
               </div>
               <div className="vd-card p-5">
-                <h3 className="font-bold">Quản lý tài khoản admin</h3>
+                <h3 className="font-display font-bold">Quản lý tài khoản admin</h3>
                 <p className="text-xs vd-muted mt-1">
                   Đổi mật khẩu, sửa tên hiển thị, phương thức đăng nhập và đăng xuất — tất cả nằm ở trang Quản lý tài khoản riêng (không còn trong tab Cài đặt này).
                   Mật khẩu tạm lần đầu rất yếu — đổi ngay sang mật khẩu mạnh (ít nhất 8 ký tự, có chữ + số) sau khi đăng nhập.

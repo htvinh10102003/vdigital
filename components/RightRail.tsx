@@ -72,8 +72,8 @@ export function CartPanel() {
 const TRUST = [
   { icon: Zap, title: "Giao hàng tức thì", desc: "Nhận tài khoản trong vài phút" },
   { icon: ShieldCheck, title: "Thanh toán an toàn", desc: "VietQR tự động qua PayOS" },
-  { icon: Headset, title: "Hỗ trợ 24/7", desc: "Luôn có người hỗ trợ bạn" },
-  { icon: Star, title: "Uy tín hàng đầu", desc: "Hơn 10.000+ khách hàng tin dùng" },
+  { icon: Headset, title: "Hỗ trợ nhanh", desc: "Phản hồi khi bạn cần" },
+  { icon: Star, title: "Bảo hành rõ ràng", desc: "1 đổi 1 nếu lỗi do shop" },
 ];
 
 export function TrustCards() {
@@ -100,8 +100,8 @@ export function FollowCard() {
   return (
     <div className="rounded-2xl bg-gradient-to-br from-brand-600 via-violet-600 to-indigo-600 p-5 text-white">
       <BellRing size={24} />
-      <p className="mt-2 font-black text-lg leading-snug">Theo dõi VDigital nhận ưu đãi</p>
-      <p className="text-sm text-white/85 mt-1">Giảm 10% cho đơn đầu tiên + tin khuyến mãi mới nhất.</p>
+      <p className="mt-2 font-black text-lg leading-snug">Theo dõi VDigital</p>
+      <p className="text-sm text-white/85 mt-1">Nhận tin khuyến mãi và sản phẩm mới nhất.</p>
       {done ? (
         <p className="mt-3 rounded-xl bg-white/15 px-3 py-2 text-sm font-semibold">Đã đăng ký! Kiểm tra email của bạn nhé.</p>
       ) : (

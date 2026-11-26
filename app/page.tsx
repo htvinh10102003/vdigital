@@ -26,7 +26,7 @@ function Section({ title, href, icon, children }: { title: string; href: string;
   return (
     <section className="mt-10">
       <div className="flex items-end justify-between mb-4">
-        <h2 className="flex items-center gap-2 text-xl md:text-2xl font-black tracking-tight">
+        <h2 className="font-display flex items-center gap-2 text-xl md:text-2xl font-black tracking-tight">
           {icon}
           {title}
         </h2>
@@ -112,7 +112,7 @@ export default async function HomePage() {
       {/* Danh mục phổ biến — icon tròn, danh mục thật của VDigital */}
       <section className="mt-10">
         <div className="flex items-end justify-between mb-4">
-          <h2 className="text-xl md:text-2xl font-black tracking-tight">Danh mục phổ biến</h2>
+          <h2 className="font-display text-xl md:text-2xl font-black tracking-tight">Danh mục phổ biến</h2>
           <Link href="/san-pham" className="text-sm text-brand-400 font-semibold hover:underline">
             Xem tất cả →
           </Link>
@@ -195,7 +195,7 @@ export default async function HomePage() {
 
       {/* 3 bước mua hàng */}
       <section className="mt-12">
-        <h2 className="text-xl md:text-2xl font-black tracking-tight mb-4">Mua hàng số chỉ trong 3 bước</h2>
+        <h2 className="font-display text-xl md:text-2xl font-black tracking-tight mb-4">Mua hàng số chỉ trong 3 bước</h2>
         <div className="grid md:grid-cols-3 gap-4">
           {[
             { n: "01", t: "Chọn sản phẩm", d: "Kiểm tra giá, thời hạn và chính sách bảo hành trước khi mua." },
@@ -213,14 +213,14 @@ export default async function HomePage() {
 
       {/* FAQ */}
       <section className="mt-12">
-        <h2 className="text-xl md:text-2xl font-black tracking-tight mb-4">Câu hỏi thường gặp</h2>
+        <h2 className="font-display text-xl md:text-2xl font-black tracking-tight mb-4">Câu hỏi thường gặp</h2>
         <FaqAccordion faqs={catalog.faqs} />
       </section>
 
       <section className="mt-12">
-        <h2 className="text-xl md:text-2xl font-black tracking-tight mb-4">Thanh toán an toàn & tiện lợi</h2>
+        <h2 className="font-display text-xl md:text-2xl font-black tracking-tight mb-4">Thanh toán an toàn & tiện lợi</h2>
         <div className="flex flex-wrap gap-2">
-          {["VietQR (PayOS)", "Chuyển khoản ngân hàng", "Thẻ ATM / Nội địa", "Thẻ quốc tế (Visa/Mastercard)", "Ví MoMo", "ZaloPay", "VNPay"].map((m) => (
+          {["VietQR (PayOS)", "Chuyển khoản ngân hàng"].map((m) => (
             <span key={m} className="chip">
               {m}
             </span>
@@ -230,7 +230,7 @@ export default async function HomePage() {
           VietQR qua PayOS là phương thức chính: miễn phí, 0% phí giao dịch, đơn được duyệt tự động sau khi thanh toán.
         </p>
         <p className="text-xs vd-muted2 mt-2 flex items-center gap-1">
-          <Zap size={13} className="text-brand-400" /> Giao hàng tức thì · Thanh toán an toàn · Hỗ trợ 24/7 · Uy tín hàng đầu
+          <Zap size={13} className="text-brand-400" /> Giao hàng tức thì · Thanh toán an toàn
         </p>
       </section>
     </div>

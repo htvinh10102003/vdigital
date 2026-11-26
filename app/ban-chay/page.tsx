@@ -6,7 +6,6 @@ export default function BanChayPage() {
       title="Bán chạy"
       description="Những sản phẩm được mua nhiều nhất tại VDigital."
       initialSort="best"
-      onlyBestSeller
     />
   );
 }

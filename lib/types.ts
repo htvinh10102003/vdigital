@@ -41,11 +41,46 @@ export interface Variant {
   delivery_template: string | null;
   /** Ghi chú giao hàng riêng cho gói này (hiện cho khách sau khi mua). */
   delivery_note: string | null;
+  /** Thông tin khách cần cung cấp cho gói làm tay (manual) — admin cấu hình
+      trong /admin. Checkout hiện đúng các ô này, validate bắt buộc rồi mới
+      cho đặt đơn. Gói auto/game_card/link không dùng. */
+  manual_fields?: ManualField[];
   is_flash: boolean;
   flash_ends_at: string | null;
   stock_count: number | null; // null = không giới hạn / không theo dõi kho
   is_active: boolean;
   sort_order: number;
+}
+
+/** Một ô thông tin khách cần cung cấp khi mua gói làm tay (manual). */
+export interface ManualField {
+  id: string;
+  label: string;
+  type: "text" | "email" | "number" | "textarea";
+  required: boolean;
+  placeholder: string;
+}
+
+/** Số liệu thật của 1 sản phẩm — tính từ đơn hàng + đánh giá trong DB,
+    KHÔNG dùng cột rating/review_count/sold_count (số seed cũ) trong bảng
+    products nữa. rating = 0 nghĩa là chưa có đánh giá nào. */
+export interface ProductStats {
+  sold: number;
+  rating: number;
+  reviewCount: number;
+  /** Phân bổ sao [5★, 4★, 3★, 2★, 1★]. */
+  starDist: [number, number, number, number, number];
+}
+
+/** Một đánh giá thật trong bảng reviews. */
+export interface Review {
+  id: string;
+  product_id: string;
+  user_id: string | null;
+  name: string;
+  stars: number;
+  content: string;
+  created_at: string;
 }
 
 export interface Product {
@@ -109,6 +144,9 @@ export interface OrderItem {
   delivered_serial: string | null;
   delivered_pin: string | null;
   delivered_note: string | null;
+  /** Thông tin khách đã điền theo manual_fields của gói (key = id của ô,
+      value = nội dung khách nhập) — admin xem trong chi tiết đơn để xử lý tay. */
+  customer_info?: Record<string, string> | null;
 }
 
 export interface Order {

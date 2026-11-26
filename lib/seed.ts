@@ -1,4 +1,4 @@
-import type { Banner, Catalog, Category, Faq, Product, Variant } from "./types";
+import type { Banner, Catalog, Category, Faq, ManualField, Product, Variant } from "./types";
 
 // Dữ liệu gốc của shop. Đây là dữ liệu SEED — khi đã cấu hình Supabase,
 // dữ liệu thật sống trong DB và sửa được trong /admin (không sửa code).
@@ -16,6 +16,12 @@ export const CATEGORIES: Category[] = [
   { id: "cat-game", slug: "the-game", name: "Thẻ game", parent_id: null, sort_order: 2 },
   { id: "cat-tool", slug: "cong-cu", name: "Công cụ", parent_id: null, sort_order: 3 },
 ];
+
+/** Ô "Email cần cung cấp" mặc định cho gói làm tay (manual) — admin sửa
+    thêm/bớt trong /admin, không cần sửa code. */
+function mfEmail(label: string): ManualField[] {
+  return [{ id: "mf-email", label, type: "email", required: true, placeholder: "ban@gmail.com" }];
+}
 
 function v(
   id: string,
@@ -59,9 +65,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Đăng nhập tài khoản VDigital và chọn gói CapCut Pro.\nBước 2: Thanh toán bằng VietQR — hệ thống tự xác nhận.\nBước 3: Vào Đơn hàng của tôi để lấy thông tin tài khoản.\nBước 4: Đăng xuất tài khoản CapCut cũ trên thiết bị.\nBước 5: Đăng nhập bằng tài khoản CapCut Pro vừa nhận và dùng ngay.",
     warranty_days: 30,
-    rating: 4.9,
-    review_count: 37,
-    sold_count: 3500,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: true,
     is_new: false,
     is_best_seller: true,
@@ -94,9 +100,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Đặt hàng và thanh toán.\nBước 2: Đơn chuyển sang Chờ xử lý — shop sẽ gửi lời mời vào team Canva Pro tới email bạn đã đặt hàng.\nBước 3: Mở email, bấm chấp nhận lời mời.\nBước 4: Vào Canva, kiểm tra đã hiện Pro rồi dùng ngay.",
     warranty_days: 30,
-    rating: 4.9,
-    review_count: 52,
-    sold_count: 2800,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: true,
     is_new: false,
     is_best_seller: true,
@@ -109,9 +115,9 @@ const PRODUCTS: Product[] = [
     initials: "CA",
     created_at: NOW,
     variants: [
-      v("v-cv-1m", "p-canva", "1 tháng", 25000, 99000, "manual", { sort_order: 1 }),
-      v("v-cv-3m", "p-canva", "3 tháng", 59000, 199000, "manual", { sort_order: 2 }),
-      v("v-cv-12m", "p-canva", "12 tháng", 149000, 499000, "manual", { is_flash: true, flash_ends_at: FLASH_END, sort_order: 3 }),
+      v("v-cv-1m", "p-canva", "1 tháng", 25000, 99000, "manual", { sort_order: 1, manual_fields: mfEmail("Email cần mời vào team Canva Pro") }),
+      v("v-cv-3m", "p-canva", "3 tháng", 59000, 199000, "manual", { sort_order: 2, manual_fields: mfEmail("Email cần mời vào team Canva Pro") }),
+      v("v-cv-12m", "p-canva", "12 tháng", 149000, 499000, "manual", { is_flash: true, flash_ends_at: FLASH_END, sort_order: 3, manual_fields: mfEmail("Email cần mời vào team Canva Pro") }),
     ],
   },
   {
@@ -125,9 +131,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Đặt hàng và thanh toán.\nBước 2: Shop liên hệ qua email/Zalo để lấy email Microsoft của bạn (nếu gói yêu cầu).\nBước 3: Nhận lời mời Family hoặc xác nhận nâng cấp.\nBước 4: Đăng nhập Microsoft 365 và dùng full tính năng.",
     warranty_days: 30,
-    rating: 4.8,
-    review_count: 41,
-    sold_count: 1900,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: true,
     is_new: false,
     is_best_seller: false,
@@ -140,8 +146,8 @@ const PRODUCTS: Product[] = [
     initials: "M3",
     created_at: NOW,
     variants: [
-      v("v-m365-1m", "p-m365", "1 tháng", 49000, 149000, "manual", { sort_order: 1 }),
-      v("v-m365-12m", "p-m365", "12 tháng", 299000, 899000, "manual", { is_flash: true, flash_ends_at: FLASH_END, sort_order: 2 }),
+      v("v-m365-1m", "p-m365", "1 tháng", 49000, 149000, "manual", { sort_order: 1, manual_fields: mfEmail("Email Microsoft cần nâng cấp") }),
+      v("v-m365-12m", "p-m365", "12 tháng", 299000, 899000, "manual", { is_flash: true, flash_ends_at: FLASH_END, sort_order: 2, manual_fields: mfEmail("Email Microsoft cần nâng cấp") }),
     ],
   },
   {
@@ -155,9 +161,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Đặt hàng và thanh toán.\nBước 2: Đơn chuyển sang Chờ xử lý — shop nâng cấp tài khoản ChatGPT trên email bạn đã cung cấp.\nBước 3: Kiểm tra tài khoản đã hiện Plus/Go.\nBước 4: Dùng ngay, không cần đổi mật khẩu.",
     warranty_days: 30,
-    rating: 4.9,
-    review_count: 64,
-    sold_count: 4200,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: true,
     is_new: false,
     is_best_seller: true,
@@ -170,7 +176,7 @@ const PRODUCTS: Product[] = [
     initials: "GP",
     created_at: NOW,
     variants: [
-      v("v-gpt-plus-1m", "p-chatgpt", "Plus — 1 tháng", 299000, 520000, "manual", { sort_order: 1 }),
+      v("v-gpt-plus-1m", "p-chatgpt", "Plus — 1 tháng", 299000, 520000, "manual", { sort_order: 1, manual_fields: mfEmail("Email tài khoản ChatGPT cần nâng cấp") }),
       v("v-gpt-go-3m", "p-chatgpt", "Go — 3 tháng", 199000, 299000, "auto", { sort_order: 2 }),
     ],
   },
@@ -185,9 +191,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Đặt hàng và thanh toán.\nBước 2: Shop liên hệ để lấy email Google của bạn.\nBước 3: Nhận lời mời / xác nhận nâng cấp.\nBước 4: Mở Gemini, kiểm tra đã hiện Pro rồi dùng.",
     warranty_days: 30,
-    rating: 4.8,
-    review_count: 28,
-    sold_count: 1500,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: true,
     is_new: true,
     is_best_seller: false,
@@ -200,9 +206,9 @@ const PRODUCTS: Product[] = [
     initials: "GE",
     created_at: NOW,
     variants: [
-      v("v-ge-1m", "p-gemini", "1 tháng", 99000, 299000, "manual", { sort_order: 1 }),
-      v("v-ge-6m", "p-gemini", "6 tháng", 499000, 999000, "manual", { sort_order: 2 }),
-      v("v-ge-18m", "p-gemini", "18 tháng", 999000, 1999000, "manual", { is_flash: true, flash_ends_at: FLASH_END, sort_order: 3 }),
+      v("v-ge-1m", "p-gemini", "1 tháng", 99000, 299000, "manual", { sort_order: 1, manual_fields: mfEmail("Email Google nhận nâng cấp") }),
+      v("v-ge-6m", "p-gemini", "6 tháng", 499000, 999000, "manual", { sort_order: 2, manual_fields: mfEmail("Email Google nhận nâng cấp") }),
+      v("v-ge-18m", "p-gemini", "18 tháng", 999000, 1999000, "manual", { is_flash: true, flash_ends_at: FLASH_END, sort_order: 3, manual_fields: mfEmail("Email Google nhận nâng cấp") }),
     ],
   },
   {
@@ -216,9 +222,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Chọn gói token và thanh toán.\nBước 2: Hệ thống tự xác nhận và giao mã kích hoạt trong Đơn hàng của tôi.\nBước 3: Nhập mã vào tài khoản Muse AI của bạn.\nBước 4: Kiểm tra số token đã cộng rồi dùng.",
     warranty_days: 30,
-    rating: 4.7,
-    review_count: 19,
-    sold_count: 860,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: false,
     is_new: true,
     is_best_seller: false,
@@ -247,9 +253,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Đặt hàng và thanh toán.\nBước 2: Shop gửi lời mời Family tới email Google của bạn.\nBước 3: Mở email, bấm chấp nhận lời mời.\nBước 4: Mở YouTube, kiểm tra đã hiện Premium rồi dùng.",
     warranty_days: 30,
-    rating: 4.9,
-    review_count: 73,
-    sold_count: 5100,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: true,
     is_new: false,
     is_best_seller: true,
@@ -262,9 +268,9 @@ const PRODUCTS: Product[] = [
     initials: "YT",
     created_at: NOW,
     variants: [
-      v("v-yt-1m", "p-youtube", "1 tháng", 49000, 109000, "manual", { sort_order: 1 }),
-      v("v-yt-3m", "p-youtube", "3 tháng", 129000, 259000, "manual", { sort_order: 2 }),
-      v("v-yt-12m", "p-youtube", "12 tháng", 399000, 799000, "manual", { is_flash: true, flash_ends_at: FLASH_END, sort_order: 3 }),
+      v("v-yt-1m", "p-youtube", "1 tháng", 49000, 109000, "manual", { sort_order: 1, manual_fields: mfEmail("Email Google nhận lời mời Family") }),
+      v("v-yt-3m", "p-youtube", "3 tháng", 129000, 259000, "manual", { sort_order: 2, manual_fields: mfEmail("Email Google nhận lời mời Family") }),
+      v("v-yt-12m", "p-youtube", "12 tháng", 399000, 799000, "manual", { is_flash: true, flash_ends_at: FLASH_END, sort_order: 3, manual_fields: mfEmail("Email Google nhận lời mời Family") }),
     ],
   },
   {
@@ -278,9 +284,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Chọn gói và thanh toán.\nBước 2: Hệ thống tự xác nhận và giao tài khoản trong Đơn hàng của tôi.\nBước 3: Đăng nhập Netflix bằng tài khoản vừa nhận.\nBước 4: Tạo hồ sơ (profile) riêng của bạn và xem.",
     warranty_days: 30,
-    rating: 4.8,
-    review_count: 46,
-    sold_count: 2300,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: false,
     is_new: false,
     is_best_seller: true,
@@ -308,9 +314,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Đặt hàng và thanh toán.\nBước 2: Shop gửi lời mời Family tới email Spotify của bạn.\nBước 3: Mở email, bấm chấp nhận.\nBước 4: Mở Spotify, kiểm tra đã hiện Premium rồi nghe.",
     warranty_days: 30,
-    rating: 4.8,
-    review_count: 33,
-    sold_count: 1700,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: false,
     is_new: false,
     is_best_seller: false,
@@ -323,9 +329,9 @@ const PRODUCTS: Product[] = [
     initials: "SP",
     created_at: NOW,
     variants: [
-      v("v-sp-1m", "p-spotify", "1 tháng", 29000, 59000, "manual", { sort_order: 1 }),
-      v("v-sp-3m", "p-spotify", "3 tháng", 69000, 149000, "manual", { sort_order: 2 }),
-      v("v-sp-12m", "p-spotify", "12 tháng", 199000, 399000, "manual", { sort_order: 3 }),
+      v("v-sp-1m", "p-spotify", "1 tháng", 29000, 59000, "manual", { sort_order: 1, manual_fields: mfEmail("Email tài khoản Spotify") }),
+      v("v-sp-3m", "p-spotify", "3 tháng", 69000, 149000, "manual", { sort_order: 2, manual_fields: mfEmail("Email tài khoản Spotify") }),
+      v("v-sp-12m", "p-spotify", "12 tháng", 199000, 399000, "manual", { sort_order: 3, manual_fields: mfEmail("Email tài khoản Spotify") }),
     ],
   },
   {
@@ -339,9 +345,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Chọn gói và thanh toán.\nBước 2: Nhận tài khoản trong Đơn hàng của tôi.\nBước 3: Tải app NordVPN, đăng nhập.\nBước 4: Chọn server và kết nối.",
     warranty_days: 30,
-    rating: 4.7,
-    review_count: 15,
-    sold_count: 640,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: false,
     is_new: false,
     is_best_seller: false,
@@ -369,9 +375,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Chọn mệnh giá và thanh toán.\nBước 2: Shop gửi mã thẻ qua email (serial + mã nạp).\nBước 3: Vào trang nạp Garena, chọn game.\nBước 4: Nhập serial và mã nạp để nhận vật phẩm.",
     warranty_days: 7,
-    rating: 4.9,
-    review_count: 58,
-    sold_count: 6800,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: true,
     is_new: false,
     is_best_seller: true,
@@ -398,9 +404,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Chọn mệnh giá và thanh toán.\nBước 2: Shop gửi mã thẻ qua email (serial + mã nạp).\nBước 3: Vào trang nạp Zing, chọn game.\nBước 4: Nhập serial và mã nạp để nhận vật phẩm.",
     warranty_days: 7,
-    rating: 4.9,
-    review_count: 44,
-    sold_count: 5200,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: true,
     is_new: false,
     is_best_seller: true,
@@ -427,9 +433,9 @@ const PRODUCTS: Product[] = [
     guide:
       "Bước 1: Chọn gói và thanh toán.\nBước 2: Nhận tài khoản trong Đơn hàng của tôi.\nBước 3: Đăng nhập ElevenLabs.\nBước 4: Tạo giọng đọc ngay.",
     warranty_days: 30,
-    rating: 4.6,
-    review_count: 12,
-    sold_count: 410,
+    rating: 0,
+    review_count: 0,
+    sold_count: 0,
     is_featured: false,
     is_new: true,
     is_best_seller: false,

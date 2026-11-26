@@ -27,7 +27,6 @@ export function ProductList({
   initialCategory = "",
   initialSort = "newest",
   onlyFlash = false,
-  onlyBestSeller = false,
 }: {
   title: string;
   description?: string;
@@ -35,7 +34,6 @@ export function ProductList({
   initialCategory?: string;
   initialSort?: SortKey;
   onlyFlash?: boolean;
-  onlyBestSeller?: boolean;
 }) {
   const { catalog } = useCatalog();
   const [q, setQ] = useState(initialQuery);
@@ -59,7 +57,6 @@ export function ProductList({
   const filtered = useMemo(() => {
     let list = catalog.products.filter((p) => p.is_active);
     if (onlyFlash) list = list.filter((p) => p.variants.some((v) => v.is_flash));
-    if (onlyBestSeller) list = list.filter((p) => p.is_best_seller);
     if (q.trim()) {
       const needle = q.trim().toLowerCase();
       list = list.filter((p) => `${p.name} ${p.tagline}`.toLowerCase().includes(needle));
@@ -99,7 +96,7 @@ export function ProductList({
         break;
     }
     return sorted;
-  }, [catalog, q, cat, sort, inStockOnly, min, max, onlyFlash, onlyBestSeller]);
+  }, [catalog, q, cat, sort, inStockOnly, min, max, onlyFlash]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
@@ -107,7 +104,7 @@ export function ProductList({
 
   return (
     <div>
-      <h1 className="text-2xl font-black tracking-tight">{title}</h1>
+      <h1 className="font-display text-2xl font-black tracking-tight">{title}</h1>
       {description && <p className="text-sm vd-muted mt-1">{description}</p>}
       <p className="text-sm vd-muted mt-2">{filtered.length} sản phẩm</p>
 

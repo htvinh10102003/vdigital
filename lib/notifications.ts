@@ -1,14 +1,16 @@
 /**
- * Thông báo trong chuông header.
- *
- * NGUỒN DỮ LIỆU (quan trọng): hiện CHƯA có bảng notifications thật trong
- * Supabase, nên danh sách dưới là DỮ LIỆU MẪU lấy từ đơn hàng/khuyến mãi của
- * shop (Flash Sale, ưu đãi 20% đơn đầu, sản phẩm mới...). Khi nối Supabase:
- * tạo bảng `notifications` (id, user_id nullable, type, title, body,
- * link, is_read, created_at) + API route /api/notifications, rồi thay
- * getSampleNotifications() bằng fetch thật ở NotificationsBell. Không bịa
- * thông báo đơn hàng cụ thể của khách — mẫu chỉ là tin chung của shop.
+ * Thông báo trong chuông header — DỮ LIỆU THẬT, suy ra từ catalog:
+ * - Flash Sale đang chạy thật (còn hạn flash_ends_at, mức giảm thật lớn
+ *   nhất tính từ giá gốc/giá bán).
+ * - Sản phẩm mới (cờ is_new) vừa lên kệ.
+ * Không có dữ liệu thì danh sách RỖNG — chuông hiện "Chưa có thông báo",
+ * KHÔNG hiện khuyến mãi mẫu/giả. (Chưa có bảng notifications riêng trong
+ * Supabase; khi cần thông báo theo từng tài khoản sẽ thêm bảng
+ * notifications + API /api/notifications sau.)
  */
+
+import type { Catalog } from "./types";
+import { discountPct } from "./format";
 
 export type NotificationKind = "promo" | "order" | "system";
 
@@ -23,49 +25,49 @@ export interface ShopNotification {
   createdAt: string;
 }
 
-export const NOTIFICATIONS_SOURCE_NOTE =
-  "Thông báo mẫu của shop — chưa nối Supabase, sẽ thay bằng dữ liệu thật sau.";
+export function getShopNotifications(catalog: Catalog): ShopNotification[] {
+  const now = Date.now();
+  const out: ShopNotification[] = [];
 
-const now = Date.now();
-const hoursAgo = (h: number) => new Date(now - h * 3600 * 1000).toISOString();
-
-export function getSampleNotifications(): ShopNotification[] {
-  return [
-    {
+  // Flash Sale đang chạy thật.
+  const flash = catalog.products.filter((p) =>
+    p.variants.some((v) => v.is_flash && v.flash_ends_at && new Date(v.flash_ends_at).getTime() > now),
+  );
+  if (flash.length > 0) {
+    const maxPct = Math.max(
+      0,
+      ...flash.flatMap((p) => p.variants.map((v) => discountPct(v.price, v.original_price))),
+    );
+    const endsAt = flash
+      .flatMap((p) => p.variants)
+      .filter((v) => v.is_flash && v.flash_ends_at)
+      .map((v) => new Date(v.flash_ends_at!).getTime())
+      .sort((a, b) => a - b)[0];
+    const endText = endsAt ? ` Kết thúc lúc ${new Date(endsAt).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} hôm nay.` : "";
+    out.push({
       id: "n-flash",
       kind: "promo",
-      title: "Flash Sale hôm nay — giảm tới 69%",
-      body: "CapCut Pro, Canva Pro, Microsoft 365 và nhiều tài khoản khác đang giảm giá trong hôm nay. Số lượng có hạn, hết giờ là về giá gốc.",
+      title: `Flash Sale — giảm tới ${maxPct}%`,
+      body: `${flash.map((p) => p.name).slice(0, 4).join(", ")} đang giảm giá.${endText} Hết giờ là về giá gốc.`,
       link: "/khuyen-mai",
       linkLabel: "Xem Flash Sale",
-      createdAt: hoursAgo(1),
-    },
-    {
-      id: "n-first-order",
-      kind: "promo",
-      title: "Ưu đãi đơn đầu tiên: giảm ngay 20%",
-      body: "Đơn hàng đầu tiên của bạn được giảm 20%. Áp dụng cho mọi tài khoản bản quyền và thẻ game trên VDigital.",
-      link: "/khuyen-mai",
-      linkLabel: "Nhận ưu đãi",
-      createdAt: hoursAgo(5),
-    },
-    {
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  // Sản phẩm mới vừa lên kệ.
+  const fresh = catalog.products.filter((p) => p.is_new);
+  if (fresh.length > 0) {
+    out.push({
       id: "n-new-products",
       kind: "system",
-      title: "Sản phẩm mới: Muse AI và ElevenLabs",
-      body: "VDigital vừa thêm gói token Muse AI và ElevenLabs Creator. Thanh toán VietQR tự động, giao hàng ngay sau khi thanh toán.",
-      link: "/san-pham",
+      title: "Sản phẩm mới vừa lên kệ",
+      body: `${fresh.map((p) => p.name).slice(0, 4).join(", ")} đã có mặt trên VDigital. Thanh toán VietQR tự động, giao hàng ngay sau khi thanh toán.`,
+      link: "/san-pham?sort=newest",
       linkLabel: "Xem sản phẩm mới",
-      createdAt: hoursAgo(26),
-    },
-    {
-      id: "n-delivery",
-      kind: "order",
-      title: "Giao hàng tức thì sau khi thanh toán",
-      body: "Đơn đã thanh toán bằng VietQR sẽ được giao ngay: tài khoản/mã hiện trong chi tiết đơn hàng và gửi về email của bạn. Đơn làm tay (nâng cấp chính chủ, add Family) shop xử lý trong 5–30 phút.",
-      link: "/tai-khoan?tab=orders",
-      linkLabel: "Xem đơn hàng của tôi",
-      createdAt: hoursAgo(50),
-    },
-  ];
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return out;
 }

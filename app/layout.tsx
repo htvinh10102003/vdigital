@@ -1,11 +1,22 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Be_Vietnam_Pro, Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/AppShell";
 import { getCatalog } from "@/lib/store";
 
+/**
+ * Typography v4 — chuyên nghiệp, hỗ trợ tốt tiếng Việt có dấu:
+ * - Be Vietnam Pro (thiết kế riêng cho tiếng Việt): tiêu đề/UI, giá, nút.
+ * - Inter: nội dung, mô tả, nhãn nhỏ.
+ * Cả hai đều qua next/font/google với subset vietnamese.
+ */
 const inter = Inter({ subsets: ["vietnamese", "latin"], variable: "--font-inter" });
+const beVietnamPro = Be_Vietnam_Pro({
+  subsets: ["vietnamese", "latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+  variable: "--font-display",
+});
 
 export const metadata: Metadata = {
   title: "VDigital — Tài khoản bản quyền số & thẻ game giá tốt",
@@ -28,7 +39,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const catalog = await getCatalog();
   return (
     <html lang="vi" suppressHydrationWarning>
-      <body className={inter.variable}>
+      <body className={`${inter.variable} ${beVietnamPro.variable}`}>
         <Providers initialCatalog={catalog}>
           <AppShell>{children}</AppShell>
         </Providers>

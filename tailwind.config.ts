@@ -22,6 +22,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
+        display: ["var(--font-display)", "var(--font-inter)", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
       },
       boxShadow: {
         card: "0 1px 2px rgba(2, 6, 23, 0.5), 0 10px 28px rgba(2, 6, 23, 0.35)",

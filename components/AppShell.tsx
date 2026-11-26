@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth, useCart, useCatalog, useTheme } from "./providers";
+import { maxDiscount } from "@/lib/catalog-utils";
 import { Logo } from "./Logo";
 import { AuthModal } from "./AuthModal";
 import { NotificationsBell } from "./NotificationsBell";
@@ -182,6 +183,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { catalog } = useCatalog();
   const topCats = catalog.categories.filter((c) => !c.parent_id);
+  // Khuyến mãi thật lớn nhất trong catalog (tính từ giá gốc/giá bán thật).
+  // Không có giảm giá thì hiện text chung — không bịa "Giảm 20%".
+  const maxDisc = Math.round(
+    Math.max(0, ...catalog.products.map((p) => maxDiscount(p))) * 100,
+  );
   return (
     <div className="flex h-full flex-col px-4 py-5">
       <Logo />
@@ -227,11 +233,19 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <div className="rounded-2xl bg-gradient-to-br from-brand-600 via-violet-600 to-indigo-600 p-4 text-white">
           <Gift size={26} />
           <p className="mt-2 font-black leading-snug">
-            Ưu đãi đặc biệt
-            <br />
-            <span className="text-amber-300">Giảm ngay 20%</span>
+            {maxDisc > 0 ? (
+              <>
+                Ưu đãi đặc biệt
+                <br />
+                <span className="text-amber-300">Giảm tới {maxDisc}%</span>
+              </>
+            ) : (
+              <>Tài khoản số giá tốt</>
+            )}
           </p>
-          <p className="text-xs text-white/80 mt-1">cho đơn hàng đầu tiên!</p>
+          <p className="text-xs text-white/80 mt-1">
+            {maxDisc > 0 ? "cho sản phẩm đang khuyến mãi!" : "Giao hàng nhanh, bảo hành rõ ràng."}
+          </p>
           <Link
             href="/khuyen-mai"
             onClick={onNavigate}
@@ -251,6 +265,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const { light, toggle } = useTheme();
   const router = useRouter();
+  const pathname = usePathname();
   const [q, setQ] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -261,6 +276,19 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener("vdigital:open-auth", open);
     return () => window.removeEventListener("vdigital:open-auth", open);
   }, []);
+
+  // Ghi lượt xem trang (page view) — chỉ lưu đường dẫn, không lưu IP hay
+  // thông tin cá nhân. Dùng cho thống kê trong /admin > Tổng quan / Báo cáo.
+  // Lỗi mạng hay bảng chưa có thì bỏ qua, không ảnh hưởng trang.
+  useEffect(() => {
+    if (!pathname) return;
+    fetch("/api/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: pathname }),
+      keepalive: true,
+    }).catch(() => {});
+  }, [pathname]);
 
   return (
     <div className="min-h-screen vd-bg">

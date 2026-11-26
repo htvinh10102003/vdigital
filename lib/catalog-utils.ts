@@ -62,15 +62,20 @@ export function partitionHome(products: Product[]) {
     return out;
   };
   const flash = take(
-    rest.filter((p) => p.variants.some((v) => v.is_flash && v.flash_ends_at)),
+    // Flash Sale chỉ hiện khi còn hạn thật (flash_ends_at trong tương lai).
+    rest.filter((p) =>
+      p.variants.some((v) => v.is_flash && v.flash_ends_at && new Date(v.flash_ends_at).getTime() > Date.now()),
+    ),
     5,
   );
   const featured = take(
     rest.filter((p) => p.is_featured),
     5,
   );
+  // "Bán chạy" = top lượt mua THẬT (đếm từ đơn đã thanh toán), không dùng
+  // cờ is_best_seller do admin tự tick.
   const best = take(
-    rest.filter((p) => p.is_best_seller),
+    [...rest].sort((a, b) => b.sold_count - a.sold_count).filter((p) => p.sold_count > 0),
     5,
   );
   const newest = take(

@@ -49,6 +49,10 @@ function variantRow(v: any, productId: string) {
     option_label: v.option_label ?? null,
     delivery_template: v.delivery_template ?? "",
     delivery_note: v.delivery_note ?? "",
+    // "Thông tin khách cần cung cấp" cho gói làm tay — lưu dạng jsonb.
+    // DB chưa chạy migration 005 (chưa có cột) thì upsert sẽ lỗi; khi đó
+    // route bắt lỗi và lưu lại không kèm manual_fields (xem POST bên dưới).
+    manual_fields: v.manual_fields ?? [],
     is_flash: v.is_flash,
     flash_ends_at: v.flash_ends_at,
     stock_count: v.stock_count,
@@ -133,7 +137,14 @@ export async function POST(req: Request) {
         });
         if (pErr) throw new Error(`Lưu sản phẩm ${p.name}: ${pErr.message}`);
         for (const v of p.variants ?? []) {
-          const { error: vErr } = await sb.from("variants").upsert(variantRow(v, p.id));
+          const row = variantRow(v, p.id);
+          let { error: vErr } = await sb.from("variants").upsert(row);
+          // DB chưa chạy migration 005 (chưa có cột manual_fields) thì lưu
+          // lại không kèm cột đó — sản phẩm vẫn lưu được, không hỏng.
+          if (vErr && vErr.message.includes("manual_fields")) {
+            const { manual_fields: _mf, ...rowNoMf } = row;
+            ({ error: vErr } = await sb.from("variants").upsert(rowNoMf));
+          }
           if (vErr) throw new Error(`Lưu gói ${v.label}: ${vErr.message}`);
         }
       }

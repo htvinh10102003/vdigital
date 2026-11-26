@@ -1,13 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, CheckCheck, ChevronDown, X } from "lucide-react";
-import {
-  NOTIFICATIONS_SOURCE_NOTE,
-  getSampleNotifications,
-  type ShopNotification,
-} from "@/lib/notifications";
+import { getShopNotifications, type ShopNotification } from "@/lib/notifications";
+import { useCatalog } from "./providers";
 
 const READ_KEY = "vdigital-notifications-read-v1";
 
@@ -45,7 +42,10 @@ export function NotificationsBell() {
   const [read, setRead] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const items = getSampleNotifications();
+  const { catalog } = useCatalog();
+  // Thông báo thật suy ra từ catalog (flash sale đang chạy, sản phẩm mới).
+  // Không có gì thì rỗng — hiện trạng thái trống, không bịa khuyến mãi.
+  const items = useMemo(() => getShopNotifications(catalog), [catalog]);
   const unread = items.filter((i) => !read.has(i.id)).length;
 
   useEffect(() => {
@@ -134,7 +134,10 @@ export function NotificationsBell() {
           </div>
 
           <ul className="max-h-[60vh] overflow-y-auto">
-            {items.map((n) => {
+            {items.length === 0 ? (
+              <li className="px-4 py-8 text-center text-sm vd-muted">Chưa có thông báo</li>
+            ) : (
+              items.map((n) => {
               const isRead = read.has(n.id);
               const expanded = expandedId === n.id;
               return (
@@ -174,9 +177,9 @@ export function NotificationsBell() {
                   )}
                 </li>
               );
-            })}
+              })
+            )}
           </ul>
-          <p className="border-t vd-border px-4 py-2.5 text-[11px] vd-muted2">{NOTIFICATIONS_SOURCE_NOTE}</p>
         </div>
       )}
     </div>

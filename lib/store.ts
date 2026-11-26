@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { DEMO_STOCK, SEED_CATALOG, findVariant } from "./seed";
 import { getSupabaseServer, isSupabaseConfigured, requireServiceRoleForWrite } from "./supabase";
+import { getProductStats } from "./stats";
 import type { Catalog, Order, OrderItem, Product, StockCode, Variant } from "./types";
 
 /**
@@ -11,13 +12,17 @@ import type { Catalog, Order, OrderItem, Product, StockCode, Variant } from "./t
  * - Chưa cấu hình: dùng dữ liệu seed trong lib/seed.ts và đơn hàng lưu trong
  *   bộ nhớ của server + file data/demo-orders.json (chế độ demo — chạy thử luồng
  *   mua/giao ngay không cần DB). README hướng dẫn tạo Supabase để có dữ liệu thật.
+ *
+ * SỐ LIỆU HIỂN THỊ (v4): rating/review_count/sold_count KHÔNG lấy từ cột
+ * cùng tên trong bảng products (đó là số seed cũ) mà tính thật từ đơn hàng
+ * đã thanh toán + bảng reviews (xem lib/stats.ts). Chưa có dữ liệu thì 0.
  */
 
 // ---------------- Catalog ----------------
 
 export async function getCatalog(): Promise<Catalog> {
   const sb = getSupabaseServer();
-  if (!sb || !isSupabaseConfigured) return SEED_CATALOG;
+  if (!sb || !isSupabaseConfigured) return zeroStatsCatalog(SEED_CATALOG);
   try {
     const [cats, prods, vars, banners, faqs] = await Promise.all([
       sb.from("categories").select("*").order("sort_order"),
@@ -27,12 +32,17 @@ export async function getCatalog(): Promise<Catalog> {
       sb.from("faqs").select("*").order("sort_order"),
     ]);
     if (cats.error || prods.error || vars.error) throw cats.error || prods.error || vars.error;
+    const stats = await getProductStats(sb);
     const products = (prods.data ?? []).map((p: any) => ({
       product_type: "account",
       account_type: "shared",
       image_url: null,
       images: [],
       ...p,
+      // Số liệu thật từ đơn hàng + reviews — ghi đè số seed cũ trong DB.
+      rating: stats[p.id]?.rating ?? 0,
+      review_count: stats[p.id]?.reviewCount ?? 0,
+      sold_count: stats[p.id]?.sold ?? 0,
       variants: (vars.data ?? [])
         .filter((v: any) => v.product_id === p.id)
         .map((v: any) => ({
@@ -40,6 +50,7 @@ export async function getCatalog(): Promise<Catalog> {
           option_label: null,
           delivery_template: null,
           delivery_note: null,
+          manual_fields: [],
           ...v,
         })),
     }));
@@ -51,8 +62,16 @@ export async function getCatalog(): Promise<Catalog> {
     };
   } catch (err) {
     console.error("[store] Lỗi đọc Supabase, dùng seed:", err);
-    return SEED_CATALOG;
+    return zeroStatsCatalog(SEED_CATALOG);
   }
+}
+
+/** Demo / chưa có Supabase: số liệu về 0, KHÔNG hiện số seed giả. */
+function zeroStatsCatalog(base: Catalog): Catalog {
+  return {
+    ...base,
+    products: base.products.map((p) => ({ ...p, rating: 0, review_count: 0, sold_count: 0 })),
+  };
 }
 
 export function findVariantInCatalog(
@@ -179,7 +198,7 @@ export async function createOrder(input: {
   customer_email: string;
   customer_phone: string;
   user_id: string | null;
-  items: { variantId: string; qty: number }[];
+  items: { variantId: string; qty: number; customerInfo?: Record<string, string> }[];
 }): Promise<Order> {
   const catalog = await getCatalog();
   let total = 0;
@@ -203,6 +222,9 @@ export async function createOrder(input: {
       delivered_serial: null,
       delivered_pin: null,
       delivered_note: null,
+      // Thông tin khách điền theo manual_fields của gói (gói làm tay) —
+      // admin xem trong chi tiết đơn để xử lý tay.
+      customer_info: it.customerInfo ?? null,
     });
   }
   const order: Order = {
@@ -245,22 +267,51 @@ export async function createOrder(input: {
       .select("*")
       .single();
     if (error) throw new Error(`Lưu đơn vào Supabase thất bại: ${error.message}`);
-    const { data: savedItems, error: itemErr } = await sb
-      .from("order_items")
-      .insert(
-        items.map((i) => ({
-          order_id: ord.id,
-          product_id: i.product_id,
-          variant_id: i.variant_id,
-          product_name: i.product_name,
-          variant_name: i.variant_name,
-          price: i.price,
-          quantity: i.quantity,
-          fulfillment_type: i.fulfillment_type,
-          status: i.status,
-        })),
-      )
-      .select("*");
+    let savedItems = null as OrderItem[] | null;
+    let itemErr = null as { message: string } | null;
+    {
+      const res = await sb
+        .from("order_items")
+        .insert(
+          items.map((i) => ({
+            order_id: ord.id,
+            product_id: i.product_id,
+            variant_id: i.variant_id,
+            product_name: i.product_name,
+            variant_name: i.variant_name,
+            price: i.price,
+            quantity: i.quantity,
+            fulfillment_type: i.fulfillment_type,
+            status: i.status,
+            customer_info: i.customer_info ?? {},
+          })),
+        )
+        .select("*");
+      savedItems = res.data as OrderItem[] | null;
+      itemErr = res.error;
+      // DB chưa chạy migration 005 (chưa có cột customer_info) thì lưu lại
+      // không kèm thông tin khách — đơn vẫn phải lưu được, không được hỏng.
+      if (itemErr && itemErr.message.includes("customer_info")) {
+        const retry = await sb
+          .from("order_items")
+          .insert(
+            items.map((i) => ({
+              order_id: ord.id,
+              product_id: i.product_id,
+              variant_id: i.variant_id,
+              product_name: i.product_name,
+              variant_name: i.variant_name,
+              price: i.price,
+              quantity: i.quantity,
+              fulfillment_type: i.fulfillment_type,
+              status: i.status,
+            })),
+          )
+          .select("*");
+        savedItems = retry.data as OrderItem[] | null;
+        itemErr = retry.error;
+      }
+    }
     if (itemErr) throw new Error(`Lưu chi tiết đơn thất bại: ${itemErr.message}`);
     order.id = ord.id;
     order.items = savedItems as OrderItem[];
