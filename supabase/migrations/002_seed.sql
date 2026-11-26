@@ -79,7 +79,7 @@ on conflict (id) do nothing;
 
 insert into faqs (id, question, answer, sort_order) values
   ('f1','Mua xong bao lâu thì nhận được tài khoản / mã?','Sản phẩm giao tự động (tài khoản có sẵn trong kho) sẽ hiện ngay trong chi tiết đơn hàng sau khi hệ thống xác nhận thanh toán, thường trong vài phút. Sản phẩm làm tay (nâng cấp chính chủ, add Family) và thẻ game cần admin xử lý, thường trong 5–30 phút trong giờ làm việc.',1),
-  ('f2','Thanh toán bằng những cách nào?','Thanh toán bằng VietQR qua PayOS: quét mã, chuyển khoản đúng số tiền và nội dung, hệ thống tự xác nhận và duyệt đơn — không thu phí giao dịch, tiền về thẳng tài khoản MB Bank của shop. Ngoài ra còn hỗ trợ chuyển khoản ngân hàng thủ công.',2),
+  ('f2','Thanh toán bằng những cách nào?','Thanh toán bằng VietQR qua PayOS: quét mã, chuyển khoản đúng số tiền và nội dung, hệ thống tự xác nhận và duyệt đơn — không thu phí giao dịch. Ngoài ra còn hỗ trợ chuyển khoản ngân hàng thủ công.',2),
   ('f3','Tài khoản dùng được trên mấy thiết bị?','Tùy từng sản phẩm: tài khoản dùng riêng không giới hạn thiết bị của bạn; tài khoản Family dùng trên email chính chủ của bạn. Chi tiết ghi rõ trong phần mô tả của từng gói.',3),
   ('f4','Tài khoản là dùng chung hay dùng riêng?','Có cả hai loại và shop ghi rõ ở từng sản phẩm: loại dùng riêng (tài khoản giao cho bạn) và loại nâng cấp chính chủ / Family (nâng cấp trên email của bạn, không cần đưa mật khẩu).',4),
   ('f5','Chính sách bảo hành / đổi trả như thế nào?','Bảo hành 1 đổi 1 trong thời gian ghi ở từng gói nếu tài khoản lỗi do shop. Thẻ game đã giao mã thành công thì không đổi trả. Bạn chỉ cần cung cấp mã đơn hàng khi cần hỗ trợ.',5),

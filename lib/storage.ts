@@ -1,4 +1,4 @@
-import { getSupabaseServer, isSupabaseConfigured } from "./supabase";
+import { getSupabaseServer, isSupabaseConfigured, requireServiceRoleForWrite } from "./supabase";
 
 /** Bucket ảnh riêng của VDigital (xem migration 003). */
 export const MEDIA_BUCKET = "vdigital-media";
@@ -18,6 +18,8 @@ export async function uploadMedia(
 ): Promise<string> {
   const sb = getSupabaseServer();
   if (!sb || !isSupabaseConfigured) throw new Error("Chưa cấu hình Supabase — không up được ảnh.");
+  // Ghi Storage cần service_role — không có thì báo rõ thay vì lỗi RLS/storage khó hiểu.
+  requireServiceRoleForWrite();
   const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, bytes, {
     contentType,
     upsert: true,

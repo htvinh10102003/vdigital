@@ -62,6 +62,8 @@ html.light ::-webkit-scrollbar-thumb {
   .vd-bg {
     background: var(--bg);
   }
+  /* Tokens theo ui-ux-pro-max: nhịp spacing 4/8, touch tối thiểu 44px,
+     khoảng cách giữa các nút bấm tối thiểu 8px. */
   .vd-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -111,15 +113,18 @@ html.light ::-webkit-scrollbar-thumb {
   }
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-3 font-bold text-white shadow-sm transition hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 disabled:opacity-40;
+    min-height: 44px;
   }
   .btn-orange {
     @apply inline-flex items-center justify-center gap-2 rounded-xl bg-accent-500 px-5 py-3 font-bold text-white shadow-sm transition hover:bg-accent-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60 disabled:opacity-40;
+    min-height: 44px;
   }
   .btn-outline {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 disabled:opacity-40;
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text);
+    min-height: 44px;
   }
   .btn-outline:hover {
     border-color: #8b5cf6;
@@ -139,4 +144,66 @@ html.light ::-webkit-scrollbar-thumb {
   .tab-btn {
     @apply px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 -mb-px transition;
   }
+}
+
+/* ---- Quy tắc toàn cục theo ui-ux-pro-max (priority 1/2/5) ---- */
+
+/* Không tràn ngang trên mobile; sticky header vẫn hoạt động với overflow-x: clip. */
+html,
+body {
+  overflow-x: clip;
+}
+
+/* Focus thấy rõ bằng bàn phím (không bỏ focus ring). */
+:focus-visible {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 2px;
+}
+
+/* Input <16px trên iOS sẽ tự zoom khi chạm — giữ 16px trên màn nhỏ. */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Tôn trọng reduced-motion: tắt hover nâng card + animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Toast "đã thêm vào giỏ" trượt lên nhẹ; số giỏ hàng nảy 1 nhịp khi tăng. */
+@keyframes vd-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.toast-in {
+  animation: vd-toast-in 180ms ease-out;
+}
+@keyframes vd-cart-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.45);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.cart-bump {
+  animation: vd-cart-pop 300ms ease-out;
 }

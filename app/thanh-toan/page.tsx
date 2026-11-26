@@ -2,11 +2,42 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Clock } from "lucide-react";
 import { useAuth, useCart, useCatalog } from "@/components/providers";
 import { formatVND } from "@/lib/format";
+import { ProductImage } from "@/components/ProductImage";
 import type { Order } from "@/lib/types";
 
 type PayState = "form" | "paying" | "done";
+
+/** Chỉ báo 3 bước: 1 Thông tin → 2 Thanh toán → 3 Nhận hàng. */
+function Steps({ current }: { current: 1 | 2 | 3 }) {
+  const steps = ["Thông tin", "Thanh toán", "Nhận hàng"];
+  return (
+    <ol className="flex items-center gap-0" aria-label="Tiến trình thanh toán">
+      {steps.map((label, i) => {
+        const n = i + 1;
+        const done = n < current;
+        const active = n === current;
+        return (
+          <li key={label} className="flex flex-1 items-center last:flex-none" aria-current={active ? "step" : undefined}>
+            <span className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                  done ? "bg-emerald-500 text-white" : active ? "bg-brand-600 text-white" : "vd-surface2 vd-muted"
+                }`}
+              >
+                {done ? "✓" : n}
+              </span>
+              <span className={`hidden text-sm font-semibold sm:block ${active ? "text-white" : "vd-muted"}`}>{label}</span>
+            </span>
+            {n < 3 && <span className={`mx-2 h-px flex-1 sm:mx-3 ${done ? "bg-emerald-500" : "vd-border bg-current opacity-20"}`} />}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 export default function CheckoutPage() {
   const { catalog } = useCatalog();
@@ -115,7 +146,8 @@ export default function CheckoutPage() {
   if (state === "done" && order) {
     return (
       <div className="max-w-3xl mx-auto px-4 mt-8">
-        <div className="vd-card border-emerald-500/50 p-6">
+        <Steps current={3} />
+        <div className="vd-card border-emerald-500/50 p-6 mt-6">
           <h1 className="text-2xl font-bold text-emerald-400">Thanh toán thành công!</h1>
           <p className=" mt-1">
             Mã đơn: <b className="font-mono">{order.code}</b> — Tổng: <b>{formatVND(order.total)}</b>
@@ -144,8 +176,8 @@ export default function CheckoutPage() {
                   </div>
                 )}
                 {item.status === "waiting_manual" && (
-                  <p className="text-sm text-amber-300 mt-2">
-                    ⏳ Đang chờ xử lý — shop sẽ hoàn thành và gửi mail cho bạn trong 5–30 phút. Xem lại trong Đơn hàng của tôi.
+                  <p className="flex items-center gap-1.5 text-sm text-amber-300 mt-2">
+                    <Clock size={15} aria-hidden="true" /> Đang chờ xử lý — shop sẽ hoàn thành và gửi mail cho bạn trong 5–30 phút. Xem lại trong Đơn hàng của tôi.
                   </p>
                 )}
                 {item.status === "failed" && (
@@ -225,36 +257,49 @@ export default function CheckoutPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 mt-6">
       <h1 className="text-2xl font-bold">Thanh toán</h1>
+      <div className="mt-4 max-w-2xl">
+        <Steps current={state === "form" ? 1 : 2} />
+      </div>
       {lines.length === 0 ? (
         <p className="vd-muted mt-4">
           Giỏ hàng trống. <button className="text-brand-400 underline" onClick={() => router.push("/san-pham")}>Tiếp tục mua sắm</button>
         </p>
       ) : (
-        <div className="mt-4 grid md:grid-cols-2 gap-6 items-start">
-          <div className="vd-card p-5 space-y-3">
+        <div className="mt-6 grid md:grid-cols-2 gap-6 items-start">
+          <div className="vd-card p-5 space-y-4">
             <h2 className="font-bold">Thông tin nhận hàng</h2>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Họ tên *" className="w-full rounded-lg vd-surface2 border vd-border px-3 py-2.5 text-sm" />
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email nhận hàng *" className="w-full rounded-lg vd-surface2 border vd-border px-3 py-2.5 text-sm" />
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Số điện thoại / Zalo (tuỳ chọn)" className="w-full rounded-lg vd-surface2 border vd-border px-3 py-2.5 text-sm" />
+            <div>
+              <label className="field-label" htmlFor="co-name">Họ tên *</label>
+              <input id="co-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nguyễn Văn A" autoComplete="name" className="field" />
+            </div>
+            <div>
+              <label className="field-label" htmlFor="co-email">Email nhận hàng *</label>
+              <input id="co-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ban@gmail.com" autoComplete="email" inputMode="email" className="field" />
+              <p className="field-hint">Tài khoản / mã thẻ sẽ gửi về email này và hiện trong Đơn hàng của tôi.</p>
+            </div>
+            <div>
+              <label className="field-label" htmlFor="co-phone">Số điện thoại / Zalo <span className="vd-muted font-normal">(tuỳ chọn)</span></label>
+              <input id="co-phone" value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^\d+ ]/g, ""))} placeholder="090..." autoComplete="tel" inputMode="tel" className="field" />
+            </div>
             <p className="text-xs vd-muted">
-              Tài khoản / mã thẻ sẽ gửi về email này và hiện trong Đơn hàng của tôi. Với gói nâng cấp chính chủ, shop liên hệ
-              qua email này để lấy thông tin.
+              Với gói nâng cấp chính chủ, shop liên hệ qua email này để lấy thông tin.
             </p>
-            {error && <p className="text-sm text-red-400">{error}</p>}
-            <button onClick={createPayment} className="w-full rounded-xl bg-brand-600 hover:bg-brand-700 py-3 font-bold text-white">
+            {error && <p role="alert" className="rounded-xl bg-red-500/10 border border-red-500/40 px-3 py-2.5 text-sm font-semibold text-red-400">{error}</p>}
+            <button onClick={createPayment} className="btn-primary w-full">
               Thanh toán VietQR — {formatVND(total)}
             </button>
-            <p className="text-xs vd-muted2 text-center">PayOS VietQR — miễn phí, 0% phí giao dịch, tiền về MB Bank, tự động duyệt đơn.</p>
+            <p className="text-xs vd-muted2 text-center">PayOS VietQR — miễn phí, 0% phí giao dịch, tự động duyệt đơn sau khi thanh toán.</p>
           </div>
           <div className="vd-card p-5">
             <h2 className="font-bold mb-3">Đơn hàng của bạn</h2>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {lines.map(({ item, product, variant }) => (
-                <div key={item.variantId} className="flex justify-between text-sm gap-3">
-                  <span>
+                <div key={item.variantId} className="flex items-center gap-3">
+                  <ProductImage product={product!} className="h-12 w-12 rounded-xl shrink-0" textSize="text-base" />
+                  <span className="min-w-0 flex-1 text-sm">
                     {product!.name} — {variant!.label} × {item.qty}
                   </span>
-                  <b>{formatVND(variant!.price * item.qty)}</b>
+                  <b className="shrink-0 text-sm">{formatVND(variant!.price * item.qty)}</b>
                 </div>
               ))}
             </div>

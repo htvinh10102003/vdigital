@@ -1,6 +1,8 @@
 // Kiểm tra nhanh các luồng chính của VDigital.
 // Chạy: npm run dev (ở terminal khác) rồi: npm run test:flows
 // Hoặc: BASE_URL=https://vdigital.vercel.app npm run test:flows
+import { readFileSync } from "node:fs";
+
 const BASE = process.env.BASE_URL || "http://localhost:3000";
 
 let pass = 0;
@@ -32,18 +34,31 @@ async function main() {
   check("home: exactly 2 game-card badges (Garena + Zing, 1 card each)", gameBadgesHome === 2, `got ${gameBadgesHome}`);
   check("home: both game brands present", html.includes("Thẻ Garena") && html.includes("Thẻ Zing"));
 
-  // 2. Danh sách sản phẩm
+  // 1b. Thẻ sản phẩm: mỗi card có CẢ "Mua ngay" và "Thêm vào giỏ" (v3).
+  const addCountHome = html.split("Thêm vào giỏ").length - 1;
+  check("home: product cards have 'Thêm vào giỏ' button", addCountHome >= 5, `got ${addCountHome}`);
+  const buyCountHome = html.split("Mua ngay").length - 1;
+  check("home: product cards have 'Mua ngay' button", buyCountHome >= 5, `got ${buyCountHome}`);
+  // Bottom nav mobile (5 mục) có trong HTML.
+  check("home: mobile bottom nav present", html.includes("Giỏ hàng") && html.includes("Tài khoản"), "bottom nav labels missing");
+  // Chuông thông báo (popup) có trong header; không còn chữ "tiền về MB Bank" ở mặt tiền.
+  // (SSR: chưa đọc localStorage nên badge hiện "Thông báo, 4 chưa đọc".)
+  check("header: notification bell present (aria-label Thông báo)", html.includes('aria-label="Thông báo'), "bell missing");
+  check("home: no customer-facing 'tiền về MB Bank'", !html.includes("tiền về MB Bank") && !html.includes("tiền về thẳng tài khoản MB Bank"), "MB Bank leak on home");
+  check("home: footer says VietQR qua PayOS (generic)", html.includes("Thanh toán an toàn qua VietQR (PayOS)"), "generic payment line missing");
   res = await fetch(`${BASE}/san-pham`);
   const listHtml = await res.text();
   check("list /san-pham renders", res.ok && listHtml.includes("sản phẩm"));
   const gameBadgesList = listHtml.split("Thẻ game · chọn mệnh giá").length - 1;
   check("list: exactly 2 game-card badges (Garena + Zing, 1 card each)", gameBadgesList === 2, `got ${gameBadgesList}`);
+  check("list: cards have both buttons", (listHtml.split("Thêm vào giỏ").length - 1) >= 5 && (listHtml.split("Mua ngay").length - 1) >= 5, "buttons missing on list");
 
   // 3. Chi tiết sản phẩm (CapCut Pro) — pill selector "Chọn gói" + giá theo gói
   res = await fetch(`${BASE}/tai-khoan-ban-quyen/capcut-pro`);
   html = await res.text();
   check("detail CapCut Pro renders", res.ok && html.includes("CapCut"));
   check("detail: option pill group label", html.includes("Chọn gói"), "no 'Chọn gói' label in SSR HTML");
+  check("detail: both 'Mua ngay' and 'Thêm vào giỏ hàng' buttons", html.includes("Mua ngay") && html.includes("Thêm vào giỏ hàng"), "detail buttons missing");
   // 3b. Chi tiết thẻ Garena — pill mệnh giá + các mệnh giá có trong HTML
   res = await fetch(`${BASE}/the-game/the-garena`);
   const gaHtml = await res.text();
@@ -57,7 +72,11 @@ async function main() {
   const variant30d = capcut?.variants.find((v) => v.label === "30 ngày");
   check("CapCut 30d variant price 55000", variant30d?.price === 55000, `got ${variant30d?.price}`);
 
-  // 5. Tạo đơn demo (chế độ chưa có PayOS) — gói auto CapCut 30 ngày
+  // 5. Tạo đơn demo (chế độ chưa có PayOS) — gói auto CapCut 30 ngày.
+  //    Ngoại lệ: ở chế độ CHECK_SERVICE_ROLE_GUARD=1 (Supabase đã cấu hình
+  //    nhưng thiếu service_role), tạo đơn PHẢI thất bại với lỗi rõ ràng nhắc
+  //    thiếu key — các bước phụ thuộc đơn (7, 8) được bỏ qua ở chế độ này.
+  const guardMode = process.env.CHECK_SERVICE_ROLE_GUARD === "1";
   res = await fetch(`${BASE}/api/payos/create-payment`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -67,8 +86,17 @@ async function main() {
     }),
   });
   const created = await res.json();
-  check("create-payment demo returns orderCode", res.ok && typeof created.orderCode === "string", JSON.stringify(created).slice(0, 200));
-  const orderCode = created.orderCode;
+  let orderCode = null;
+  if (guardMode) {
+    check(
+      "guard mode: create-payment fails with clear env error, not RLS text",
+      !res.ok && typeof created.error === "string" && created.error.includes("SUPABASE_SERVICE_ROLE_KEY") && !created.error.includes("permission denied"),
+      JSON.stringify(created).slice(0, 200),
+    );
+  } else {
+    check("create-payment demo returns orderCode", res.ok && typeof created.orderCode === "string", JSON.stringify(created).slice(0, 200));
+    orderCode = created.orderCode;
+  }
 
   // 6. Webhook từ chối body sai (demo mode: body rỗng -> 400)
   res = await fetch(`${BASE}/api/payos/webhook`, {
@@ -111,6 +139,34 @@ async function main() {
   // 11. Admin API không có quyền -> 403
   res = await fetch(`${BASE}/api/admin/orders`);
   check("admin API without auth returns 403", res.status === 403, `got ${res.status}`);
+
+  // 12. Trang giỏ / thanh toán / tài khoản render được (không 404, không trắng)
+  for (const [label, path] of [
+    ["cart page", "/gio-hang"],
+    ["checkout page", "/thanh-toan"],
+    ["account page", "/tai-khoan"],
+    ["account manage page", "/tai-khoan/quan-ly"],
+  ]) {
+    res = await fetch(`${BASE}${path}`);
+    const pHtml = await res.text();
+    check(`${label} renders`, res.ok && pHtml.includes("VDigital"), `got ${res.status}`);
+  }
+
+  // 12b. Trang Quản lý tài khoản: khách chưa đăng nhập thấy CTA đăng nhập;
+  // các mục (đổi mật khẩu / phương thức / đăng xuất) nằm trong source, chỉ
+  // render khi đã đăng nhập.
+  res = await fetch(`${BASE}/tai-khoan/quan-ly`);
+  html = await res.text();
+  check("account manage: guest sees login CTA", res.ok && html.includes("Quản lý tài khoản") && html.includes("Đăng nhập / Đăng ký"), `got ${res.status}`);
+  const manageSrc = readFileSync(new URL("../app/tai-khoan/quan-ly/page.tsx", import.meta.url), "utf8");
+  check("account manage: has change-password section in source", manageSrc.includes("Đổi mật khẩu") && manageSrc.includes("Mật khẩu hiện tại") && manageSrc.includes("Xác nhận mật khẩu mới"), "password fields missing in source");
+  check("account manage: has login methods + logout in source", manageSrc.includes("Phương thức đăng nhập") && manageSrc.includes("Đăng xuất") && manageSrc.includes("Đơn hàng của tôi"));
+  res = await fetch(`${BASE}/tai-khoan`);
+  html = await res.text();
+  check("account page: no password change (moved to /tai-khoan/quan-ly)", !html.includes("Đổi mật khẩu"), "password change still on /tai-khoan");
+
+  // 13. Guard thiếu service_role — đã kiểm ở bước 5 khi CHECK_SERVICE_ROLE_GUARD=1
+  //    (tạo đơn trả lỗi rõ ràng nhắc thiếu key, không phải text RLS).
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { isSupabaseConfigured, useAuth } from "./providers";
 
@@ -24,7 +24,20 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
   const [busy, setBusy] = useState(false);
   const s = strength(password);
 
-  if (!open) return null;
+  // Modal CHỈ đóng khi: bấm nút X, bấm nút Hủy, hoặc bấm phím Esc.
+  // Không đóng khi di chuột ra ngoài, không đóng khi click vào vùng tối xung
+  // quanh (backdrop không còn onClick nữa — trước đây click vô tình ra ngoài
+  // là modal biến mất và dữ liệu đã nhập bị xóa theo).
+  // Modal cũng KHÔNG unmount khi đóng (chỉ ẩn bằng `hidden`) nên email/mật
+  // khẩu đã gõ vẫn còn nguyên khi mở lại.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,11 +55,14 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
-      <div
-        className="w-full max-w-md vd-card p-6 shadow-lift"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div
+      className={`fixed inset-0 z-50 items-center justify-center bg-black/70 p-4 ${open ? "flex" : "hidden"}`}
+      role="dialog"
+      aria-modal="true"
+      aria-hidden={!open}
+      aria-label={mode === "login" ? "Đăng nhập" : "Tạo tài khoản mới"}
+    >
+      <div className="w-full max-w-md vd-card p-6 shadow-lift">
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-xl font-bold">{mode === "login" ? "Đăng nhập" : "Tạo tài khoản mới"}</h2>
@@ -54,7 +70,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
               {mode === "login" ? "Chào mừng bạn trở lại với VDigital" : "Mua nhanh hơn, xem lại đơn đã mua"}
             </p>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/10" aria-label="Đóng">
+          <button onClick={onClose} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-white/10" aria-label="Đóng">
             <X size={20} />
           </button>
         </div>
@@ -67,30 +83,46 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
 
         <form onSubmit={submit} className="mt-4 space-y-3">
           {mode === "register" && (
+            <div>
+              <label className="field-label" htmlFor="auth-name">Họ tên</label>
+              <input
+                id="auth-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Nguyễn Văn A"
+                required
+                autoComplete="name"
+                className="field"
+              />
+            </div>
+          )}
+          <div>
+            <label className="field-label" htmlFor="auth-email">Email</label>
             <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Họ tên"
+              id="auth-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="example@gmail.com"
               required
+              autoComplete="email"
+              inputMode="email"
               className="field"
             />
-          )}
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="example@gmail.com"
-            required
-            className="field"
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Mật khẩu"
-            required
-            className="field"
-          />
+          </div>
+          <div>
+            <label className="field-label" htmlFor="auth-password">Mật khẩu</label>
+            <input
+              id="auth-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mật khẩu"
+              required
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              className="field"
+            />
+          </div>
           {mode === "register" && password && (
             <div>
               <div className="h-1.5 rounded-full vd-surface2 overflow-hidden">
@@ -99,12 +131,15 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
               <p className="text-xs vd-muted mt-1">{s.label}</p>
             </div>
           )}
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error && <p role="alert" className="rounded-xl bg-red-500/10 border border-red-500/40 px-3 py-2.5 text-sm font-semibold text-red-400">{error}</p>}
           <button
             disabled={busy}
             className="btn-primary w-full disabled:opacity-50"
           >
             {busy ? "Đang xử lý…" : mode === "login" ? "Đăng nhập" : "Tạo tài khoản"}
+          </button>
+          <button type="button" onClick={onClose} className="btn-outline w-full">
+            Hủy
           </button>
         </form>
 

@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Bell,
   Gift,
   Grid2x2,
   Headset,
@@ -15,6 +14,8 @@ import {
   Moon,
   Package,
   Search,
+  Settings,
+  ShieldCheck,
   ShoppingCart,
   Sun,
   User,
@@ -24,15 +25,158 @@ import {
 import { useAuth, useCart, useCatalog, useTheme } from "./providers";
 import { Logo } from "./Logo";
 import { AuthModal } from "./AuthModal";
+import { NotificationsBell } from "./NotificationsBell";
 
 const NAV = [
   { href: "/", label: "Trang chủ", icon: Home },
   { href: "/san-pham", label: "Danh mục", icon: Grid2x2 },
-  { href: "/tai-khoan?tab=orders", label: "Đơn hàng", icon: Package },
+  { href: "/tai-khoan?tab=orders", label: "Đơn hàng", icon: Package, exact: true },
+  { href: "/tai-khoan/quan-ly", label: "Quản lý tài khoản", icon: User },
   { href: "/thanh-toan", label: "Nạp tiền", icon: Wallet },
   { href: "/huong-dan", label: "Hỗ trợ", icon: Headset },
   { href: "/dieu-khoan", label: "Về chúng tôi", icon: Info },
 ];
+
+/** Menu thả xuống khi bấm avatar ở header: Quản lý tài khoản, Đơn hàng,
+    Cài đặt, Đăng xuất (+ Quản trị VDigital nếu là admin). Đóng khi bấm ra
+    ngoài, bấm Esc, hoặc chọn 1 mục. Trên mobile không tràn màn hình. */
+function AvatarMenu() {
+  const auth = useAuth();
+  const { light, toggle } = useTheme();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open ]);
+
+  if (!auth.user) return null;
+  const items = [
+    { href: "/tai-khoan/quan-ly", label: "Quản lý tài khoản", icon: User },
+    { href: "/tai-khoan?tab=orders", label: "Đơn hàng của tôi", icon: Package },
+    { href: "/tai-khoan/quan-ly", label: "Cài đặt", icon: Settings },
+    ...(auth.isAdmin ? [{ href: "/admin", label: "Quản trị VDigital", icon: ShieldCheck }] : []),
+  ];
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Menu tài khoản"
+        aria-expanded={open}
+        className="flex min-h-11 items-center gap-2 rounded-full border vd-border py-1.5 pl-1.5 pr-3 hover:border-brand-500"
+      >
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-600 text-sm font-black text-white">
+          {auth.user.name.charAt(0).toUpperCase()}
+        </span>
+        <span className="hidden text-sm font-semibold md:block">{auth.user.name}</span>
+      </button>
+      {open && (
+        <div role="menu" aria-label="Menu tài khoản" className="vd-card absolute right-0 top-full z-50 mt-2 w-[min(88vw,260px)] overflow-hidden py-1.5 shadow-lift">
+          <div className="border-b vd-border px-4 py-2.5">
+            <p className="truncate font-bold">{auth.user.name}</p>
+            <p className="truncate text-xs vd-muted">{auth.user.email}</p>
+          </div>
+          {items.map((n) => (
+            <Link
+              key={n.label}
+              href={n.href}
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm font-semibold transition hover:bg-white/5"
+            >
+              <n.icon size={17} aria-hidden="true" className="vd-muted" />
+              {n.label}
+            </Link>
+          ))}
+          <button
+            onClick={() => {
+              toggle();
+              setOpen(false);
+            }}
+            role="menuitem"
+            className="flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold transition hover:bg-white/5"
+          >
+            {light ? <Moon size={17} aria-hidden="true" className="vd-muted" /> : <Sun size={17} aria-hidden="true" className="vd-muted" />}
+            Chế độ {light ? "tối" : "sáng"}
+          </button>
+          <div className="mt-1 border-t vd-border pt-1">
+            <button
+              onClick={() => {
+                setOpen(false);
+                auth.signOut();
+              }}
+              role="menuitem"
+              className="flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold text-red-400 transition hover:bg-white/5"
+            >
+              <LogOut size={17} aria-hidden="true" /> Đăng xuất
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Bottom nav mobile (≤5 mục, theo ui-ux-pro-max): sidebar trái trên desktop
+    thu gọn thành thanh điều hướng dưới trên điện thoại, tôn trọng safe-area. */
+function BottomNav() {
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const cart = useCart();
+  const items = [
+    { href: "/", label: "Trang chủ", icon: Home, active: pathname === "/" },
+    { href: "/san-pham", label: "Danh mục", icon: Grid2x2, active: pathname.startsWith("/san-pham") || pathname.startsWith("/tai-khoan-ban-quyen") || pathname.startsWith("/the-game") },
+    { href: "/gio-hang", label: "Giỏ hàng", icon: ShoppingCart, active: pathname.startsWith("/gio-hang") || pathname.startsWith("/thanh-toan"), badge: cart.count },
+    { href: "/tai-khoan?tab=orders", label: "Đơn hàng", icon: Package, active: pathname.startsWith("/tai-khoan") && !pathname.startsWith("/tai-khoan/quan-ly") && search.get("tab") !== "account" },
+    { href: "/tai-khoan/quan-ly", label: "Tài khoản", icon: User, active: pathname.startsWith("/tai-khoan/quan-ly") },
+  ];
+  return (
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 border-t vd-border lg:hidden"
+      style={{ background: "var(--bg-soft)", paddingBottom: "env(safe-area-inset-bottom)" }}
+      aria-label="Điều hướng chính"
+    >
+      <div className="grid grid-cols-5">
+        {items.map((n) => (
+          <Link
+            key={n.label}
+            href={n.href}
+            aria-label={n.label}
+            aria-current={n.active ? "page" : undefined}
+            className={`relative flex min-h-[56px] flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] font-semibold transition ${
+              n.active ? "text-brand-400" : "vd-muted hover:text-white"
+            }`}
+          >
+            <span className="relative">
+              <n.icon size={22} aria-hidden="true" />
+              {n.badge !== undefined && n.badge > 0 && (
+                <span
+                  key={n.badge}
+                  className="cart-bump absolute -top-1.5 -right-2.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white"
+                >
+                  {n.badge}
+                </span>
+              )}
+            </span>
+            {n.label}
+          </Link>
+        ))}
+      </div>
+    </nav>
+  );
+}
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
@@ -43,7 +187,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <Logo />
       <nav className="mt-8 space-y-1">
         {NAV.map((n) => {
-          const active = pathname === n.href || (n.href !== "/" && pathname.startsWith(n.href.split("?")[0]));
+          const base = n.href.split("?")[0];
+          // exact (vd Đơn hàng): chỉ sáng khi đúng trang đó, không sáng ké ở
+          // trang con như /tai-khoan/quan-ly.
+          const active = "exact" in n && n.exact ? pathname === base : pathname === n.href || (n.href !== "/" && pathname.startsWith(base));
           return (
             <Link
               key={n.href}
@@ -108,6 +255,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [authOpen, setAuthOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Trang con (vd /tai-khoan/quan-ly) có thể mở modal đăng nhập bằng event.
+  useEffect(() => {
+    const open = () => setAuthOpen(true);
+    window.addEventListener("vdigital:open-auth", open);
+    return () => window.removeEventListener("vdigital:open-auth", open);
+  }, []);
+
   return (
     <div className="min-h-screen vd-bg">
       {/* Sidebar desktop */}
@@ -151,7 +305,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Tìm kiếm sản phẩm... (VD: CapCut, Garena, ChatGPT)"
+                  placeholder="Tìm kiếm sản phẩm..."
                   className="field !rounded-full !py-3 !pl-11 !pr-4"
                   aria-label="Tìm kiếm sản phẩm"
                 />
@@ -159,32 +313,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             </form>
             <button
               onClick={toggle}
-              className="rounded-full p-2.5 vd-muted hover:text-white border vd-border"
+              className="hidden rounded-full p-2.5 vd-muted hover:text-white border vd-border md:flex items-center justify-center"
               aria-label={light ? "Chuyển sang nền tối" : "Chuyển sang nền sáng"}
               title={light ? "Nền tối" : "Nền sáng"}
             >
               {light ? <Moon size={18} /> : <Sun size={18} />}
             </button>
-            <Link href="/tai-khoan?tab=orders" className="relative rounded-full p-2.5 vd-muted hover:text-white border vd-border" aria-label="Thông báo / đơn hàng">
-              <Bell size={18} />
-              {cart.count > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white">
-                  {cart.count}
-                </span>
-              )}
-            </Link>
+            <NotificationsBell />
             {auth.user ? (
-              <div className="flex items-center gap-2">
-                <Link href="/tai-khoan" className="flex items-center gap-2 rounded-full border vd-border py-1.5 pl-1.5 pr-3 hover:border-brand-500">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-600 text-sm font-black text-white">
-                    {auth.user.name.charAt(0).toUpperCase()}
-                  </span>
-                  <span className="hidden text-sm font-semibold md:block">{auth.user.name}</span>
-                </Link>
-                <button onClick={() => auth.signOut()} className="rounded-full p-2 vd-muted hover:text-red-400" title="Đăng xuất" aria-label="Đăng xuất">
-                  <LogOut size={17} />
-                </button>
-              </div>
+              <AvatarMenu />
             ) : (
               <button
                 onClick={() => setAuthOpen(true)}
@@ -199,12 +336,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="min-h-[70vh] px-4 md:px-6 py-5">{children}</main>
+        <main className="min-h-[70vh] px-4 md:px-6 py-5 pb-24 lg:pb-5">{children}</main>
 
-        <footer className="border-t vd-border px-4 md:px-6 py-6 text-sm vd-muted">
+        <footer className="border-t vd-border px-4 md:px-6 pt-6 pb-24 lg:pb-6 text-sm vd-muted">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
-              <b className="text-white">VDigital</b> — Tài khoản số giá tốt · Thanh toán VietQR tự động, tiền về MB Bank.
+              <b className="text-white">VDigital</b> — Tài khoản số giá tốt · Thanh toán an toàn qua VietQR (PayOS).
             </span>
             <span className="flex gap-4">
               <Link href="/huong-dan" className="hover:text-white">Hướng dẫn</Link>
@@ -215,6 +352,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </footer>
       </div>
+      <Suspense fallback={null}>
+        <BottomNav />
+      </Suspense>
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   );

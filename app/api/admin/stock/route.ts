@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { forbidden, getAdminEmail } from "@/lib/admin-auth";
-import { getSupabaseServer, isSupabaseConfigured } from "@/lib/supabase";
+import { getSupabaseServer, isSupabaseConfigured, requireServiceRoleForWrite } from "@/lib/supabase";
 import { addDemoStockCodes } from "@/lib/store";
 
 /** Thêm mã vào kho (gói giao tự động). Body: { variantId, codes: string[] } */
@@ -16,6 +16,7 @@ export async function POST(req: Request) {
     }
     const sb = getSupabaseServer();
     if (sb && isSupabaseConfigured) {
+      requireServiceRoleForWrite();
       const { error } = await sb.from("stock_codes").insert(
         clean.map((code) => ({ variant_id: variantId, code, is_used: false })),
       );

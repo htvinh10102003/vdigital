@@ -495,7 +495,7 @@ export const FAQS: Faq[] = [
     id: "f2",
     question: "Thanh toán bằng những cách nào?",
     answer:
-      "Thanh toán bằng VietQR qua PayOS: quét mã, chuyển khoản đúng số tiền và nội dung, hệ thống tự xác nhận và duyệt đơn — không thu phí giao dịch, tiền về thẳng tài khoản MB Bank của shop. Ngoài ra còn hỗ trợ chuyển khoản ngân hàng thủ công.",
+      "Thanh toán bằng VietQR qua PayOS: quét mã, chuyển khoản đúng số tiền và nội dung, hệ thống tự xác nhận và duyệt đơn — không thu phí giao dịch. Ngoài ra còn hỗ trợ chuyển khoản ngân hàng thủ công.",
     sort_order: 2,
   },
   {

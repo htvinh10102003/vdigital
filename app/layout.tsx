@@ -14,6 +14,12 @@ export const metadata: Metadata = {
   icons: { icon: "/favicon.svg" },
 };
 
+/** Viewport mobile-first: đúng chiều rộng thiết bị, KHÔNG khóa zoom (a11y). */
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export const revalidate = 60;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

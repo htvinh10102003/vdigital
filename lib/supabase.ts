@@ -79,15 +79,47 @@ export function getSupabaseServer(): SupabaseClient | null {
   return getSupabase();
 }
 
-export function adminEmails(): string[] {
-  const raw =
-    process.env.ADMIN_EMAILS || process.env.NEXT_PUBLIC_ADMIN_EMAILS || "";
-  const list = raw
-    .split(",")
+/** Key service_role đã cấu hình chưa (server-only). */
+export function hasServiceRole(): boolean {
+  return Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY);
+}
+
+/**
+ * Lỗi rõ ràng khi Supabase đã cấu hình nhưng thiếu service_role.
+ * Không có service_role, server rơi về dùng anon key — mà bảng orders chỉ có
+ * policy SELECT cho chủ đơn, KHÔNG có policy INSERT cho anon, nên PostgREST
+ * trả 42501 "permission denied for table orders". Không được "sửa" bằng cách
+ * thêm policy INSERT cho anon (ai cũng ghi được đơn giả). Cách sửa đúng duy
+ * nhất: thêm SUPABASE_SERVICE_ROLE_KEY vào Vercel rồi Redeploy.
+ */
+export const SERVICE_ROLE_MISSING_MESSAGE =
+  "Chưa cấu hình SUPABASE_SERVICE_ROLE_KEY trên Vercel — đơn chưa được lưu, hãy thêm key service_role trong Vercel → Settings → Environment Variables rồi Redeploy";
+
+/** Ném lỗi rõ ràng trên thay vì để RLS trả "permission denied for table orders". */
+export function requireServiceRoleForWrite(): void {
+  if (isSupabaseConfigured && !hasServiceRole()) throw new Error(SERVICE_ROLE_MISSING_MESSAGE);
+}
+
+/**
+ * Gộp danh sách email admin từ các nguồn env + email mặc định.
+ * Quy tắc (sửa 26/11 sau lỗi "Không có quyền"): DEFAULT_ADMIN_EMAIL
+ * (contact.hotavinh@gmail.com) LUÔN nằm trong danh sách — trước đây nó chỉ
+ * được thêm khi env rỗng, nên nếu trên Vercel đặt ADMIN_EMAILS /
+ * NEXT_PUBLIC_ADMIN_EMAILS là email khác thì tài khoản mặc định bị loại
+ * khỏi admin. Chỉ áp dụng cho VDigital, không đổi admin Our Days/AWSAMELIE.
+ */
+export function resolveAdminEmails(...rawLists: (string | undefined | null)[]): string[] {
+  const list = rawLists
+    .flatMap((raw) => (raw || "").split(","))
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  // Mặc định: admin VDigital là contact.hotavinh@gmail.com khi env chưa đặt.
-  return list.length ? list : [DEFAULT_ADMIN_EMAIL];
+  const merged = [...new Set(list)];
+  if (!merged.includes(DEFAULT_ADMIN_EMAIL)) merged.push(DEFAULT_ADMIN_EMAIL);
+  return merged;
+}
+
+export function adminEmails(): string[] {
+  return resolveAdminEmails(process.env.ADMIN_EMAILS, process.env.NEXT_PUBLIC_ADMIN_EMAILS);
 }
 
 export function isAdminEmail(email: string | null | undefined): boolean {

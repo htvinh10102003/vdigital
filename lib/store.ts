@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { DEMO_STOCK, SEED_CATALOG, findVariant } from "./seed";
-import { getSupabaseServer, isSupabaseConfigured } from "./supabase";
+import { getSupabaseServer, isSupabaseConfigured, requireServiceRoleForWrite } from "./supabase";
 import type { Catalog, Order, OrderItem, Product, StockCode, Variant } from "./types";
 
 /**
@@ -118,6 +118,9 @@ export function saveDemoOrder(order: Order): void {
 export async function takeStockCode(variantId: string, orderId: string): Promise<StockCode | null> {
   const sb = getSupabaseServer();
   if (sb && isSupabaseConfigured) {
+    // Ghi is_used cần service_role — không có thì báo rõ, đừng để anon
+    // đọc kho trống rồi đơn rơi về "Hết mã" một cách khó hiểu.
+    requireServiceRoleForWrite();
     const { data, error } = await sb
       .from("stock_codes")
       .select("*")
@@ -223,6 +226,9 @@ export async function createOrder(input: {
 
   const sb = getSupabaseServer();
   if (sb && isSupabaseConfigured) {
+    // Chưa có service_role thì dừng ngay với lỗi rõ ràng — đừng để anon
+    // client chạm vào bảng orders rồi nhận "permission denied for table orders".
+    requireServiceRoleForWrite();
     const { data: ord, error } = await sb
       .from("orders")
       .insert({
@@ -304,6 +310,7 @@ export async function listOrders(): Promise<Order[]> {
 export async function updateOrder(order: Order): Promise<void> {
   const sb = getSupabaseServer();
   if (sb && isSupabaseConfigured) {
+    requireServiceRoleForWrite();
     await sb
       .from("orders")
       .update({

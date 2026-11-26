@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, useAuth, useCatalog, saveCatalogOverrides } from "@/components/providers";
 import { getSupabase } from "@/lib/supabase";
@@ -95,10 +96,6 @@ export default function AdminPage() {
   const [editBanners, setEditBanners] = useState<Banner[] | null>(null);
   const [editFaqs, setEditFaqs] = useState<Faq[] | null>(null);
 
-  // Đổi mật khẩu admin
-  const [pw1, setPw1] = useState("");
-  const [pw2, setPw2] = useState("");
-  const [pwMsg, setPwMsg] = useState("");
 
   async function loadOrders() {
     setLoading(true);
@@ -222,25 +219,6 @@ export default function AdminPage() {
     const data = await res.json();
     setMsg(res.ok ? `Đã thêm ${data.added} mã (${data.mode}). ${data.note ?? ""}` : data.error || "Lỗi thêm mã");
     if (res.ok) setStockCodes("");
-  }
-
-  async function changePassword() {
-    setPwMsg("");
-    if (pw1.length < 8) {
-      setPwMsg("Mật khẩu mới cần ít nhất 8 ký tự (nên có chữ + số).");
-      return;
-    }
-    if (pw1 !== pw2) {
-      setPwMsg("Hai mật khẩu không khớp.");
-      return;
-    }
-    const r = await auth.changePassword(pw1);
-    if (r.error) setPwMsg(`Đổi mật khẩu thất bại: ${r.error}`);
-    else {
-      setPwMsg("Đã đổi mật khẩu thành công.");
-      setPw1("");
-      setPw2("");
-    }
   }
 
   if (auth.loading) return <p className="mt-10 vd-muted">Đang kiểm tra quyền…</p>;
@@ -500,7 +478,7 @@ export default function AdminPage() {
                     };
                     return (
                       <div key={v.id} className="vd-card-flat p-3 space-y-2">
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="grid grid-cols-1 min-[560px]:grid-cols-2 gap-2">
                           <label className="block">
                             <span className="field-label">Nhãn gói *</span>
                             <input value={v.label} onChange={(e) => setV({ label: e.target.value, name: e.target.value })} className="field" />
@@ -518,7 +496,7 @@ export default function AdminPage() {
                             <input type="number" value={v.stock_count ?? ""} onChange={(e) => setV({ stock_count: e.target.value === "" ? null : Number(e.target.value) })} className="field" placeholder="Không giới hạn" />
                           </label>
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="grid grid-cols-1 min-[560px]:grid-cols-2 gap-2">
                           <label className="block">
                             <span className="field-label">Loại lựa chọn</span>
                             <select value={v.option_type} onChange={(e) => setV({ option_type: e.target.value as never })} className="field">
@@ -671,6 +649,19 @@ export default function AdminPage() {
             <p className="vd-muted">Đang tải cài đặt…</p>
           ) : (
             <>
+              {/* Cảnh báo nổi bật: thiếu service_role thì đơn không lưu được
+                  (lỗi "permission denied for table orders") — xem README mục 7. */}
+              {settings.supabase &&
+                settings.env?.find((e: { name: string }) => e.name.includes("SERVICE_ROLE"))?.configured === false && (
+                  <div role="alert" className="rounded-2xl border border-red-500/50 bg-red-500/10 p-4">
+                    <p className="font-bold text-red-400">Thiếu SUPABASE_SERVICE_ROLE_KEY — đơn hàng sẽ không lưu được</p>
+                    <p className="mt-1 text-sm">
+                      Server đang dùng anon key nên Supabase chặn ghi đơn (“permission denied for table orders”).
+                      Lấy key service_role ở Supabase → Settings → API, thêm vào Vercel → Settings → Environment
+                      Variables (dạng Secret) rồi Redeploy. Không thêm policy INSERT cho anon.
+                    </p>
+                  </div>
+                )}
               <div className="vd-card p-5">
                 <h3 className="font-bold">Trạng thái cấu hình</h3>
                 <p className="text-xs vd-muted mt-1">
@@ -703,16 +694,14 @@ export default function AdminPage() {
                 </p>
               </div>
               <div className="vd-card p-5">
-                <h3 className="font-bold">Đổi mật khẩu admin</h3>
+                <h3 className="font-bold">Quản lý tài khoản admin</h3>
                 <p className="text-xs vd-muted mt-1">
-                  Mật khẩu tạm lần đầu rất yếu, chỉ dùng để vào lần đầu — đổi ngay sang mật khẩu mạnh (ít nhất 8 ký tự, có chữ + số) sau khi đăng nhập.
+                  Đổi mật khẩu, sửa tên hiển thị, phương thức đăng nhập và đăng xuất — tất cả nằm ở trang Quản lý tài khoản riêng (không còn trong tab Cài đặt này).
+                  Mật khẩu tạm lần đầu rất yếu — đổi ngay sang mật khẩu mạnh (ít nhất 8 ký tự, có chữ + số) sau khi đăng nhập.
                 </p>
-                <div className="mt-3 space-y-2">
-                  <input type="password" value={pw1} onChange={(e) => setPw1(e.target.value)} placeholder="Mật khẩu mới" className="field" autoComplete="new-password" />
-                  <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder="Nhập lại mật khẩu mới" className="field" autoComplete="new-password" />
-                  <button onClick={changePassword} className="btn-primary !py-2.5 text-sm">Đổi mật khẩu</button>
-                  {pwMsg && <p className="vd-muted">{pwMsg}</p>}
-                </div>
+                <Link href="/tai-khoan/quan-ly" className="btn-primary mt-3 inline-flex !py-2.5 text-sm">
+                  Mở Quản lý tài khoản
+                </Link>
               </div>
             </>
           )}

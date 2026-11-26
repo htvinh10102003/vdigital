@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Gamepad2, Grid2x2, KeyRound, Play, ShieldCheck, Sparkles, Wrench, Zap } from "lucide-react";
 import { getCatalog } from "@/lib/store";
 import { partitionHome } from "@/lib/catalog-utils";
+import { categoryPath } from "@/lib/catalog-utils";
 import { ProductCard } from "@/components/ProductCard";
 import { CartPanel, FollowCard, TrustCards } from "@/components/RightRail";
 import { FaqAccordion } from "@/components/FaqAccordion";
@@ -21,11 +22,14 @@ const CAT_ICONS: Record<string, typeof KeyRound> = {
   "vpn-tien-ich": ShieldCheck,
 };
 
-function Section({ title, href, children }: { title: string; href: string; children: React.ReactNode }) {
+function Section({ title, href, icon, children }: { title: string; href: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="mt-10">
       <div className="flex items-end justify-between mb-4">
-        <h2 className="text-xl md:text-2xl font-black tracking-tight">{title}</h2>
+        <h2 className="flex items-center gap-2 text-xl md:text-2xl font-black tracking-tight">
+          {icon}
+          {title}
+        </h2>
         <Link href={href} className="text-sm text-brand-400 font-semibold hover:underline shrink-0">
           Xem tất cả →
         </Link>
@@ -59,7 +63,7 @@ export default async function HomePage() {
             <span className="inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold tracking-widest">
               VDigital — TÀI KHOẢN SỐ GIÁ TỐT
             </span>
-            <h1 className="mt-4 text-4xl md:text-5xl font-black leading-[1.1] max-w-lg">
+            <h1 className="mt-4 text-3xl leading-[1.15] md:text-5xl md:leading-[1.1] font-black max-w-lg">
               Nhanh chóng
               <br />
               An toàn — Tiện lợi
@@ -83,13 +87,15 @@ export default async function HomePage() {
               </Link>
             </div>
           </div>
-          {/* Minh họa: các ô sản phẩm nổi — tự vẽ, không dùng ảnh/nhân vật của hãng khác */}
+          {/* Minh họa: các ô sản phẩm nổi — tự vẽ, không dùng ảnh/nhân vật của hãng khác.
+              Mỗi ô link đúng trang chi tiết của sản phẩm đó. */}
           <div className="relative mt-8 flex gap-3">
             {heroTiles.map((p) => (
               <Link
                 key={p.id}
-                href={`/san-pham`}
-                className="flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-white/15 border border-white/25 backdrop-blur text-center"
+                href={categoryPath(catalog.categories, p)}
+                aria-label={p.name}
+                className="flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-white/15 border border-white/25 backdrop-blur text-center transition hover:bg-white/25"
               >
                 <span className="px-1 text-[11px] md:text-xs font-black leading-tight">{p.initials}</span>
               </Link>
@@ -127,7 +133,7 @@ export default async function HomePage() {
       </section>
 
       {flash.length > 0 && (
-        <Section title="⚡ Flash Sale hôm nay" href="/khuyen-mai">
+        <Section title="Flash Sale hôm nay" href="/khuyen-mai" icon={<Zap size={22} className="text-amber-400" aria-hidden="true" />}>
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
             {flash.map((p) => (
               <ProductCard key={p.id} product={p} />
@@ -214,14 +220,14 @@ export default async function HomePage() {
       <section className="mt-12">
         <h2 className="text-xl md:text-2xl font-black tracking-tight mb-4">Thanh toán an toàn & tiện lợi</h2>
         <div className="flex flex-wrap gap-2">
-          {["VietQR (PayOS)", "Chuyển khoản ngân hàng — MB Bank", "Thẻ ATM / Nội địa", "Thẻ quốc tế (Visa/Mastercard)", "Ví MoMo", "ZaloPay", "VNPay"].map((m) => (
+          {["VietQR (PayOS)", "Chuyển khoản ngân hàng", "Thẻ ATM / Nội địa", "Thẻ quốc tế (Visa/Mastercard)", "Ví MoMo", "ZaloPay", "VNPay"].map((m) => (
             <span key={m} className="chip">
               {m}
             </span>
           ))}
         </div>
         <p className="text-xs vd-muted2 mt-3">
-          VietQR qua PayOS là phương thức chính: miễn phí, 0% phí giao dịch, tiền về thẳng tài khoản MB Bank của shop và đơn được duyệt tự động.
+          VietQR qua PayOS là phương thức chính: miễn phí, 0% phí giao dịch, đơn được duyệt tự động sau khi thanh toán.
         </p>
         <p className="text-xs vd-muted2 mt-2 flex items-center gap-1">
           <Zap size={13} className="text-brand-400" /> Giao hàng tức thì · Thanh toán an toàn · Hỗ trợ 24/7 · Uy tín hàng đầu

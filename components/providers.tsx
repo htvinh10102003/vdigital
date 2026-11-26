@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { SEED_CATALOG } from "@/lib/seed";
-import { DEFAULT_ADMIN_EMAIL, getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { getSupabase, isSupabaseConfigured, resolveAdminEmails } from "@/lib/supabase";
 import type { CartItem, Catalog, Product } from "@/lib/types";
 
 // ---------------- Catalog ----------------
@@ -58,6 +58,9 @@ export interface AuthUser {
   email: string;
   name: string;
   isDemo?: boolean;
+  /** Các phương thức đăng nhập đã liên kết: "email", "google"... */
+  providers?: string[];
+  createdAt?: string;
 }
 
 interface AuthCtx {
@@ -69,7 +72,10 @@ interface AuthCtx {
   signInGoogle: () => Promise<void>;
   demoSignIn: (email: string) => void;
   signOut: () => Promise<void>;
-  changePassword: (newPassword: string) => Promise<{ error?: string }>;
+  /** Đổi mật khẩu: xác thực lại bằng mật khẩu hiện tại rồi mới đặt mật khẩu mới. */
+  changePasswordWithCurrent: (currentPassword: string, newPassword: string) => Promise<{ error?: string }>;
+  /** Đổi tên hiển thị. */
+  updateName: (name: string) => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthCtx>({
@@ -81,7 +87,8 @@ const AuthContext = createContext<AuthCtx>({
   signInGoogle: async () => {},
   demoSignIn: () => {},
   signOut: async () => {},
-  changePassword: async () => ({ error: "Chưa cấu hình" }),
+  changePasswordWithCurrent: async () => ({ error: "Chưa cấu hình" }),
+  updateName: async () => ({ error: "Chưa cấu hình" }),
 });
 
 export function useAuth() {
@@ -89,11 +96,38 @@ export function useAuth() {
 }
 
 // Email admin mặc định của VDigital khi env chưa đặt.
-const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
-  .split(",")
-  .map((s) => s.trim().toLowerCase())
-  .filter(Boolean);
-if (ADMIN_EMAILS.length === 0) ADMIN_EMAILS.push(DEFAULT_ADMIN_EMAIL);
+// Client chỉ thấy NEXT_PUBLIC_ADMIN_EMAILS — email mặc định LUÔN có mặt
+// (resolveAdminEmails), kể cả khi env đặt email khác (xem lib/supabase.ts).
+const ADMIN_EMAILS = resolveAdminEmails(process.env.NEXT_PUBLIC_ADMIN_EMAILS);
+
+// ---------------- Toast (thông báo nhanh: đã thêm vào giỏ...) ----------------
+
+interface ToastCtx {
+  notify: (message: string) => void;
+}
+
+const ToastContext = createContext<ToastCtx>({ notify: () => {} });
+
+export function useToast() {
+  return useContext(ToastContext);
+}
+
+function ToastHost({ toast }: { toast: { id: number; message: string } | null }) {
+  if (!toast) return null;
+  return (
+    <div
+      key={toast.id}
+      role="status"
+      aria-live="polite"
+      className="toast-in fixed left-1/2 bottom-24 z-[70] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2"
+    >
+      <div className="flex items-center gap-2.5 rounded-2xl border border-emerald-500/40 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-2xl">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/20 text-base leading-none">✓</span>
+        <span className="min-w-0">{toast.message}</span>
+      </div>
+    </div>
+  );
+}
 
 // ---------------- Cart ----------------
 
@@ -144,6 +178,16 @@ export function useTheme(): { light: boolean; toggle: () => void } {
   return { light, toggle: () => setLight((v) => !v) };
 }
 
+function toAuthUser(u: { email?: string; user_metadata?: Record<string, unknown>; identities?: { provider?: string }[]; created_at?: string } | null | undefined): AuthUser | null {
+  if (!u?.email) return null;
+  return {
+    email: u.email,
+    name: (u.user_metadata?.name as string) || u.email,
+    providers: [...new Set((u.identities ?? []).map((i) => i.provider).filter(Boolean) as string[])],
+    createdAt: u.created_at,
+  };
+}
+
 // ---------------- Providers ----------------
 
 export function Providers({ children, initialCatalog }: { children: ReactNode; initialCatalog?: Catalog }) {
@@ -156,6 +200,17 @@ export function Providers({ children, initialCatalog }: { children: ReactNode; i
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+
+  // Toast tự ẩn sau 2.5s; mỗi lần notify mới là 1 id mới (kể cả trùng nội dung).
+  const notify = useCallback((message: string) => {
+    setToast({ id: Date.now() + Math.random(), message });
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const refreshCatalog = useCallback(async () => {
     try {
@@ -182,12 +237,12 @@ export function Providers({ children, initialCatalog }: { children: ReactNode; i
     if (sb) {
       sb.auth.getSession().then(({ data }) => {
         const u = data.session?.user;
-        if (u?.email) setUser({ email: u.email, name: (u.user_metadata?.name as string) || u.email });
+        setUser(toAuthUser(u));
         setAuthLoading(false);
       });
       const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
         const u = session?.user;
-        setUser(u?.email ? { email: u.email, name: (u.user_metadata?.name as string) || u.email } : null);
+        setUser(toAuthUser(u));
       });
       return () => sub.subscription.unsubscribe();
     }
@@ -254,11 +309,32 @@ export function Providers({ children, initialCatalog }: { children: ReactNode; i
           /* ignore */
         }
       },
-      changePassword: async (newPassword) => {
+      changePasswordWithCurrent: async (currentPassword, newPassword) => {
         const sb = getSupabase();
         if (!sb) return { error: "Chưa cấu hình Supabase." };
+        if (!user?.email) return { error: "Chưa đăng nhập." };
+        if (user.isDemo) return { error: "Tài khoản demo không đổi được mật khẩu." };
+        // Xác thực lại mật khẩu hiện tại trước khi cho đổi (Supabase không
+        // có API đổi mật khẩu yêu cầu mật khẩu cũ — tự verify bằng sign-in).
+        const { error: signInErr } = await sb.auth.signInWithPassword({ email: user.email, password: currentPassword });
+        if (signInErr) return { error: "Mật khẩu hiện tại không đúng." };
         const { error } = await sb.auth.updateUser({ password: newPassword });
         return error ? { error: error.message } : {};
+      },
+      updateName: async (name) => {
+        const sb = getSupabase();
+        if (!sb) return { error: "Chưa cấu hình Supabase." };
+        if (!user?.email) return { error: "Chưa đăng nhập." };
+        if (user.isDemo) {
+          const u: AuthUser = { ...user, name };
+          setUser(u);
+          try { localStorage.setItem(USER_KEY, JSON.stringify(u)); } catch { /* ignore */ }
+          return {};
+        }
+        const { error } = await sb.auth.updateUser({ data: { name } });
+        if (error) return { error: error.message };
+        setUser((prev) => (prev ? { ...prev, name } : prev));
+        return {};
       },
     };
   }, [user, authLoading]);
@@ -288,7 +364,10 @@ export function Providers({ children, initialCatalog }: { children: ReactNode; i
   return (
     <CatalogContext.Provider value={{ catalog, loading: catalogLoading, refresh: refreshCatalog }}>
       <AuthContext.Provider value={auth}>
-        <CartContext.Provider value={cart}>{children}</CartContext.Provider>
+        <CartContext.Provider value={cart}>
+          <ToastContext.Provider value={{ notify }}>{children}</ToastContext.Provider>
+          <ToastHost toast={toast} />
+        </CartContext.Provider>
       </AuthContext.Provider>
     </CatalogContext.Provider>
   );

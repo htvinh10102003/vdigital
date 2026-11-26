@@ -45,6 +45,8 @@ export function ProductList({
   const [min, setMin] = useState("");
   const [max, setMax] = useState("");
   const [page, setPage] = useState(1);
+  // Mobile: bộ lọc thu gọn sau nút "Bộ lọc" để không chiếm cả màn hình.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const topCats = catalog.categories.filter((c) => !c.parent_id);
 
@@ -109,8 +111,17 @@ export function ProductList({
       {description && <p className="text-sm vd-muted mt-1">{description}</p>}
       <p className="text-sm vd-muted mt-2">{filtered.length} sản phẩm</p>
 
+      <button
+        onClick={() => setFiltersOpen((v) => !v)}
+        aria-expanded={filtersOpen}
+        className="btn-outline mt-4 w-full !py-2.5 text-sm lg:hidden"
+      >
+        {filtersOpen ? "Ẩn bộ lọc ▲" : "Bộ lọc ▼"}
+        {cat || inStockOnly || min || max ? " • đang lọc" : ""}
+      </button>
+
       <div className="mt-5 grid lg:grid-cols-[240px_1fr] gap-6 items-start">
-        <aside className="vd-card p-4 space-y-5 lg:sticky lg:top-24">
+        <aside className={`vd-card p-4 space-y-5 lg:sticky lg:top-24 ${filtersOpen ? "block" : "hidden"} lg:block`}>
           <div>
             <label className="field-label" htmlFor="pl-search">Tìm kiếm</label>
             <input
@@ -216,7 +227,10 @@ export function ProductList({
             </span>
             <select
               value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
+              onChange={(e) => {
+                setSort(e.target.value as SortKey);
+                setPage(1);
+              }}
               className="field !w-auto"
               aria-label="Sắp xếp"
             >

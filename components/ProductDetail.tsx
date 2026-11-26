@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ShoppingCart, Star, Zap } from "lucide-react";
 import { discountPct, formatVND } from "@/lib/format";
-import { useAuth, useCart, useCatalog } from "@/components/providers";
+import { useAuth, useCart, useCatalog, useToast } from "@/components/providers";
 import { Countdown } from "@/components/Countdown";
-import { ProductCard, categoryPath } from "@/components/ProductCard";
-import { activeVariants, optionGroupLabel } from "@/lib/catalog-utils";
+import { ProductCard } from "@/components/ProductCard";
+import { activeVariants, categoryPath, optionGroupLabel } from "@/lib/catalog-utils";
 import { ProductImage } from "@/components/ProductImage";
 
 interface Review {
@@ -34,6 +34,7 @@ function loadReviews(productId: string): Review[] {
 export function ProductDetail({ slug }: { slug: string }) {
   const { catalog } = useCatalog();
   const cart = useCart();
+  const toast = useToast();
   const auth = useAuth();
   const router = useRouter();
   const product = catalog.products.find((p) => p.slug === slug);
@@ -188,7 +189,9 @@ export function ProductDetail({ slug }: { slug: string }) {
             </p>
           )}
 
-          <div className="flex gap-3 mt-5">
+          {/* Mua ngay + Thêm vào giỏ: xếp dọc trên màn rất nhỏ, cạnh nhau từ sm;
+              thêm vào giỏ chỉ hiện toast + tăng số giỏ, không chuyển trang. */}
+          <div className="flex flex-col gap-3 sm:flex-row mt-5">
             <button
               disabled={!selected || !inStock}
               onClick={() => {
@@ -196,16 +199,22 @@ export function ProductDetail({ slug }: { slug: string }) {
                 cart.add(selected.id, product.id);
                 router.push("/thanh-toan");
               }}
+              aria-label={`Mua ngay ${product.name} — ${selected?.label ?? ""}`}
               className="flex-1 btn-primary disabled:opacity-40"
             >
               Mua ngay
             </button>
             <button
               disabled={!selected || !inStock}
-              onClick={() => selected && cart.add(selected.id, product.id)}
+              onClick={() => {
+                if (!selected) return;
+                cart.add(selected.id, product.id);
+                toast.notify(`Đã thêm ${product.name} — ${selected.label} vào giỏ hàng`);
+              }}
+              aria-label={`Thêm ${product.name} — ${selected?.label ?? ""} vào giỏ hàng`}
               className="flex-1 btn-outline disabled:opacity-40"
             >
-              <ShoppingCart size={18} /> Thêm vào giỏ hàng
+              <ShoppingCart size={18} aria-hidden="true" /> Thêm vào giỏ hàng
             </button>
           </div>
         </div>

@@ -188,6 +188,33 @@ Domain chưa mua. Khi Vinh chốt tên miền thì mua và gắn vào Vercel →
 sau đó sửa `NEXT_PUBLIC_SITE_URL` thành domain thật và cập nhật lại Webhook URL trong
 PayOS dashboard + Return URL (tự lấy theo `NEXT_PUBLIC_SITE_URL`).
 
+## 7. Khắc phục sự cố
+
+### Lỗi: "Lưu đơn vào Supabase thất bại: permission denied for table orders"
+
+**Nguyên nhân (đã xác minh 26/11):** `SUPABASE_SERVICE_ROLE_KEY` chưa có trên Vercel nên
+server rơi về dùng anon key. Bảng `orders` chỉ có policy SELECT cho chủ đơn
+("owner read orders"), **không có policy INSERT cho anon** — theo đúng thiết kế
+(đã kiểm tra live toàn bộ policy: products/variants/categories/banners/faqs đọc
+công khai, reviews auth insert, stock_codes không có policy công khai).
+
+**Cách sửa đúng:** lấy key `service_role` ở Supabase → Settings → API, thêm vào
+Vercel → Project → Settings → Environment Variables với tên
+`SUPABASE_SERVICE_ROLE_KEY` (dạng **Secret**), rồi **Redeploy**. Xong kiểm tra tab
+Cài đặt trong `/admin` — dòng service_role phải hiện "Đã có", nếu thiếu sẽ có
+cảnh báo đỏ ở đầu tab.
+
+**Không làm thế này:** đừng thêm policy INSERT cho anon/authenticated trên bảng
+`orders` — ai cũng ghi được đơn giả vào DB. Code đã được sửa để khi thiếu key
+thì báo rõ "Chưa cấu hình SUPABASE_SERVICE_ROLE_KEY trên Vercel — đơn chưa được
+lưu..." thay vì báo RLS khó hiểu (xem `lib/supabase.ts` →
+`requireServiceRoleForWrite()`).
+
+### Live /admin báo "Chế độ demo" dù đã link Supabase
+
+Xem mục 4 — Vercel integration có thể tạo biến tên không có `NEXT_PUBLIC_`
+hoặc key publishable; code đã chấp nhận cả hai kiểu tên.
+
 ## Cấu trúc code
 
 ```

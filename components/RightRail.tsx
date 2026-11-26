@@ -78,12 +78,16 @@ const TRUST = [
 
 export function TrustCards() {
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="vd-card divide-y vd-border overflow-hidden">
       {TRUST.map((t) => (
-        <div key={t.title} className="vd-card p-4">
-          <t.icon size={22} className="text-brand-400" />
-          <p className="mt-2 text-sm font-bold leading-snug">{t.title}</p>
-          <p className="text-xs vd-muted mt-0.5 leading-snug">{t.desc}</p>
+        <div key={t.title} className="flex items-center gap-3 px-4 py-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-600/15">
+            <t.icon size={20} className="text-brand-400" aria-hidden="true" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm font-bold leading-snug">{t.title}</span>
+            <span className="block truncate text-xs vd-muted">{t.desc}</span>
+          </span>
         </div>
       ))}
     </div>

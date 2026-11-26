@@ -1,51 +1,45 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useAuth } from "@/components/providers";
+import { Check, Clock, Copy } from "lucide-react";
+import { useAuth, useToast } from "@/components/providers";
 import { formatDateTime, formatVND } from "@/lib/format";
 import type { Order } from "@/lib/types";
 
 export default function AccountPage() {
   const auth = useAuth();
-  const [tab, setTab] = useState<"orders" | "account">("orders");
+  const toast = useToast();
+  const router = useRouter();
   const [codes, setCodes] = useState<string[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [lookup, setLookup] = useState("");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
-  const [pw1, setPw1] = useState("");
-  const [pw2, setPw2] = useState("");
-  const [pwMsg, setPwMsg] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
 
-  async function changePassword() {
-    setPwMsg("");
-    if (pw1.length < 8) {
-      setPwMsg("Mật khẩu mới cần ít nhất 8 ký tự.");
-      return;
-    }
-    if (pw1 !== pw2) {
-      setPwMsg("Hai mật khẩu không khớp.");
-      return;
-    }
-    const r = await auth.changePassword(pw1);
-    if (r.error) setPwMsg(`Đổi mật khẩu thất bại: ${r.error}`);
-    else {
-      setPwMsg("Đã đổi mật khẩu thành công.");
-      setPw1("");
-      setPw2("");
+  async function copyCode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(code);
+      toast.notify(`Đã sao chép mã đơn ${code}`);
+      setTimeout(() => setCopied((c) => (c === code ? null : c)), 2000);
+    } catch {
+      toast.notify(`Mã đơn: ${code}`);
     }
   }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("tab") === "account") setTab("account");
+    if (params.get("tab") === "account") router.replace("/tai-khoan/quan-ly");
     try {
       const raw = localStorage.getItem("vdigital-my-orders");
       if (raw) setCodes(JSON.parse(raw));
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (codes.length === 0) return;
@@ -92,69 +86,32 @@ export default function AccountPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 mt-6">
-      <h1 className="text-2xl font-bold">Tài khoản của tôi</h1>
+      <h1 className="text-2xl font-bold">Đơn hàng của tôi</h1>
+      <p className="text-sm vd-muted mt-1">
+        Quản lý tài khoản, đổi mật khẩu, đăng xuất:{" "}
+        <Link href="/tai-khoan/quan-ly" className="font-semibold text-brand-400 hover:underline">Quản lý tài khoản</Link>
+      </p>
       {!auth.user && (
         <p className="text-sm text-amber-300 mt-2">
           Bạn chưa đăng nhập — vẫn xem được đơn bằng mã đơn bên dưới. Đăng nhập (nút Tài khoản ở header) để lưu lịch sử đơn theo tài khoản.
         </p>
       )}
-      <div className="flex gap-1 border-b vd-border mt-4">
-        {(["orders", "account"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px ${tab === t ? "border-brand-500 text-brand-400" : "border-transparent vd-muted"}`}
-          >
-            {t === "orders" ? "Đơn hàng của tôi" : "Quản lý tài khoản"}
-          </button>
-        ))}
-      </div>
-
-      {tab === "account" && (
-        <div className="py-6 max-w-md space-y-3">
-          {auth.user ? (
-            <>
-              <p><b>Họ tên:</b> {auth.user.name}</p>
-              <p><b>Email:</b> {auth.user.email}</p>
-              {auth.user.isDemo && <p className="text-sm text-amber-300">Tài khoản demo (chưa cấu hình Supabase).</p>}
-              <div className="vd-card p-4 !max-w-none">
-                <h3 className="font-bold">Đổi mật khẩu</h3>
-                <p className="text-xs vd-muted mt-1">
-                  {auth.isAdmin
-                    ? "Mật khẩu tạm lần đầu rất yếu — đổi ngay sang mật khẩu mạnh (ít nhất 8 ký tự, có chữ + số) sau khi đăng nhập lần đầu."
-                    : "Đặt mật khẩu mới ít nhất 8 ký tự."}
-                </p>
-                <div className="mt-3 space-y-2">
-                  <input type="password" value={pw1} onChange={(e) => setPw1(e.target.value)} placeholder="Mật khẩu mới" className="field" autoComplete="new-password" />
-                  <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder="Nhập lại mật khẩu mới" className="field" autoComplete="new-password" />
-                  <button onClick={changePassword} className="btn-primary !py-2.5 text-sm">Đổi mật khẩu</button>
-                  {pwMsg && <p className="text-sm vd-muted">{pwMsg}</p>}
-                </div>
-              </div>
-              <button onClick={() => auth.signOut()} className="rounded-lg border border-red-500/60 text-red-400 px-4 py-2 text-sm font-semibold">
-                Đăng xuất
-              </button>
-            </>
-          ) : (
-            <p className="vd-muted">Chưa đăng nhập. Bấm nút Tài khoản ở header để đăng nhập / đăng ký.</p>
-          )}
-        </div>
-      )}
-
-      {tab === "orders" && (
-        <div className="py-6">
+      <div className="py-6">
+        <label className="field-label" htmlFor="order-lookup">Tra cứu đơn hàng bằng mã đơn</label>
           <div className="flex gap-2 max-w-md">
             <input
+              id="order-lookup"
               value={lookup}
               onChange={(e) => setLookup(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && lookupOrder()}
               placeholder="Nhập mã đơn (vd VD261126-XXXX)"
               className="flex-1 rounded-lg vd-card-flat border vd-border px-3 py-2 text-sm font-mono"
             />
-            <button onClick={lookupOrder} className="rounded-lg bg-brand-600 hover:bg-brand-700 px-4 py-2 text-sm font-semibold text-white">
+            <button onClick={lookupOrder} className="min-h-11 rounded-lg bg-brand-600 hover:bg-brand-700 px-4 py-2 text-sm font-semibold text-white">
               Tra đơn
             </button>
           </div>
-          {msg && <p className="text-sm text-red-400 mt-2">{msg}</p>}
+          {msg && <p role="alert" className="text-sm text-red-400 mt-2">{msg}</p>}
           {loading && <p className="vd-muted mt-4">Đang tải đơn…</p>}
           {orders.length === 0 && !loading && (
             <p className="vd-muted mt-4">Chưa có đơn hàng nào. Mã đơn được lưu tự động sau khi bạn đặt hàng trên trình duyệt này.</p>
@@ -163,7 +120,16 @@ export default function AccountPage() {
             {orders.map((o) => (
               <div key={o.id} className="vd-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <b className="font-mono">{o.code}</b>
+                  <span className="flex items-center gap-1.5">
+                    <b className="font-mono">{o.code}</b>
+                    <button
+                      onClick={() => copyCode(o.code)}
+                      aria-label={`Sao chép mã đơn ${o.code}`}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg vd-muted hover:text-white hover:bg-white/5"
+                    >
+                      {copied === o.code ? <Check size={15} className="text-emerald-400" aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
+                    </button>
+                  </span>
                   <span className="text-xs rounded-full vd-surface2 px-2.5 py-1 font-semibold">{statusLabel[o.status] ?? o.status}</span>
                   <span className="text-sm vd-muted">{formatDateTime(o.created_at)}</span>
                   <b className="text-brand-400">{formatVND(o.total)}</b>
@@ -186,7 +152,11 @@ export default function AccountPage() {
                           {item.delivered_note && <p className="vd-muted">{item.delivered_note}</p>}
                         </div>
                       )}
-                      {item.status === "waiting_manual" && <p className="text-amber-300 mt-1">⏳ Đang chờ shop xử lý — sẽ gửi mail khi xong.</p>}
+                      {item.status === "waiting_manual" && (
+                        <p className="flex items-center gap-1.5 text-amber-300 mt-1">
+                          <Clock size={14} aria-hidden="true" /> Đang chờ shop xử lý — sẽ gửi mail khi xong.
+                        </p>
+                      )}
                       {item.status === "failed" && <p className="text-red-400 mt-1">Hết mã trong kho — shop sẽ giao tay, liên hệ kèm mã đơn.</p>}
                       {item.status === "pending" && <p className="vd-muted mt-1">Chưa thanh toán.</p>}
                     </div>
@@ -196,7 +166,6 @@ export default function AccountPage() {
             ))}
           </div>
         </div>
-      )}
     </div>
   );
 }
