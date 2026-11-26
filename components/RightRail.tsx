@@ -19,6 +19,8 @@ export function CartPanel() {
     })
     .filter((l) => l.product && l.variant);
   const total = lines.reduce((s, l) => s + (l.variant?.price ?? 0) * l.item.qty, 0);
+  const originalTotal = lines.reduce((s, l) => s + (l.variant?.original_price ?? l.variant?.price ?? 0) * l.item.qty, 0);
+  const savings = originalTotal - total;
 
   return (
     <div className="vd-card p-5">
@@ -49,16 +51,33 @@ export function CartPanel() {
                   {product!.name} — {variant!.label}
                 </p>
                 <p className="text-xs vd-muted">
-                  {item.qty} × {formatVND(variant!.price)}
+                  {formatVND(variant!.price)}
+                  {variant!.original_price > variant!.price && (
+                    <span className="line-through ml-1.5">{formatVND(variant!.original_price)}</span>
+                  )}
+                </p>
+                <p className="flex items-center gap-1 mt-1">
+                  <button onClick={() => cart.setQty(item.variantId, item.qty - 1)} aria-label={`Giảm số lượng ${product!.name}`} className="flex h-6 w-6 items-center justify-center rounded-md vd-surface2 border vd-border text-sm font-bold">−</button>
+                  <span className="w-5 text-center text-xs font-semibold">{item.qty}</span>
+                  <button onClick={() => cart.setQty(item.variantId, item.qty + 1)} aria-label={`Tăng số lượng ${product!.name}`} className="flex h-6 w-6 items-center justify-center rounded-md vd-surface2 border vd-border text-sm font-bold">+</button>
+                  <button onClick={() => cart.remove(item.variantId)} aria-label={`Xoá ${product!.name} khỏi giỏ`} className="ml-1 text-xs vd-muted hover:text-red-400 font-bold">✕</button>
                 </p>
               </div>
               <span className="text-sm font-bold text-brand-400">{formatVND(variant!.price * item.qty)}</span>
             </div>
           ))}
           {lines.length > 3 && <p className="text-xs vd-muted">+ {lines.length - 3} sản phẩm nữa</p>}
-          <div className="flex items-center justify-between border-t vd-border pt-3">
-            <span className="text-sm vd-muted">Tổng cộng</span>
-            <span className="font-black text-brand-400">{formatVND(total)}</span>
+          <div className="border-t vd-border pt-3 space-y-1">
+            {savings > 0 && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="vd-muted">Tiết kiệm</span>
+                <span className="font-bold text-emerald-300">−{formatVND(savings)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-sm vd-muted">Tổng cộng</span>
+              <span className="font-black text-brand-400">{formatVND(total)}</span>
+            </div>
           </div>
           <Link href="/gio-hang" className="btn-primary w-full !py-2.5 text-sm">
             Xem giỏ hàng

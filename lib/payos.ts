@@ -91,3 +91,28 @@ export async function createPayosPayment(req: PayosPaymentRequest): Promise<Payo
     amount: json.data.amount,
   };
 }
+
+/**
+ * Hỏi trực tiếp PayOS xem link thanh toán này đã trả chưa — dùng làm
+ * phương án dự phòng khi webhook tới mà chữ ký không khớp (vd PayOS đổi
+ * định dạng dữ liệu): chỉ tin API PayOS trả về, không tin body webhook.
+ * Trả { status: "PAID" | "PENDING" | "CANCELLED" | ..., amount } hoặc null
+ * khi PayOS lỗi / không tìm thấy.
+ */
+export async function getPayosPaymentStatus(
+  orderCode: number,
+): Promise<{ status: string; amount: number } | null> {
+  try {
+    const res = await fetch(`https://api-merchant.payos.vn/v2/payment-requests/${orderCode}`, {
+      headers: {
+        "x-client-id": process.env.PAYOS_CLIENT_ID!,
+        "x-api-key": process.env.PAYOS_API_KEY!,
+      },
+    });
+    const json = await res.json();
+    if (!res.ok || json?.code !== "00" || !json?.data) return null;
+    return { status: String(json.data.status ?? ""), amount: Number(json.data.amount ?? 0) };
+  } catch {
+    return null;
+  }
+}

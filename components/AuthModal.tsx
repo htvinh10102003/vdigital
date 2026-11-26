@@ -150,21 +150,6 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
         >
           Đăng nhập bằng Google
         </button>
-        {!isSupabaseConfigured && (
-          <button
-            onClick={() => {
-              if (!email.includes("@")) {
-                setError("Nhập email để vào demo.");
-                return;
-              }
-              auth.demoSignIn(email);
-              onClose();
-            }}
-            className="mt-3 w-full rounded-lg border border-amber-500/60 text-amber-300 py-2.5 font-semibold text-sm"
-          >
-            Vào demo bằng email trên
-          </button>
-        )}
         <p className="mt-4 text-center text-sm vd-muted">
           {mode === "login" ? (
             <>

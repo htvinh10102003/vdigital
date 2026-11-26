@@ -596,18 +596,6 @@ export default function AdminPage() {
       <div className="max-w-md mx-auto mt-16 text-center">
         <h1 className="font-display text-2xl font-black">Quản trị VDigital</h1>
         <p className="vd-muted mt-2">Khu vực này chỉ dành cho admin. Đăng nhập bằng email admin để tiếp tục.</p>
-        {!isSupabaseConfigured && (
-          <button
-            onClick={() => auth.demoSignIn("admin@vdigital.vn")}
-            className="btn-primary mt-6"
-          >
-            Vào admin demo
-          </button>
-        )}
-        <p className="text-xs vd-muted2 mt-3">
-          Chế độ demo (chưa cấu hình Supabase). Khi có Supabase, admin đăng nhập bằng email trong ADMIN_EMAILS
-          (mặc định contact.hotavinh@gmail.com).
-        </p>
       </div>
     );
   }
@@ -650,7 +638,7 @@ export default function AdminPage() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="font-display text-2xl font-black tracking-tight">Quản trị VDigital</h1>
         <span className="text-xs rounded-full vd-card-flat px-3 py-1">
-          {isSupabaseConfigured ? "Supabase: đã cấu hình" : "Chế độ demo — chưa cấu hình Supabase"}
+          {isSupabaseConfigured ? "Supabase: đã cấu hình" : "Supabase: chưa cấu hình"}
         </span>
       </div>
       {msg && (

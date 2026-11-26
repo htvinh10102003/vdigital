@@ -113,7 +113,6 @@ export default function AccountManagePage() {
                 </span>
               )}
             </div>
-            {user.isDemo && <p className="mt-3 text-sm text-amber-300">Tài khoản demo (chưa cấu hình Supabase).</p>}
             <div className="mt-4">
               <label className="field-label" htmlFor="display-name">Tên hiển thị</label>
               <div className="flex gap-2">

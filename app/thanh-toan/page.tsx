@@ -51,7 +51,8 @@ export default function CheckoutPage() {
   const [error, setError] = useState("");
   const [payInfo, setPayInfo] = useState<any>(null);
   const [order, setOrder] = useState<Order | null>(null);
-  const [simulating, setSimulating] = useState(false);
+  // Thông báo khi khách bấm "Tôi đã chuyển khoản" mà tiền chưa về.
+  const [checkMsg, setCheckMsg] = useState("");
   // Thông tin khách điền theo manual_fields của từng gói làm tay —
   // key: variantId → fieldId → giá trị.
   const [customerInfo, setCustomerInfo] = useState<Record<string, Record<string, string>>>({});
@@ -71,11 +72,6 @@ export default function CheckoutPage() {
     })
     .filter((l) => l.product && l.variant);
   const total = lines.reduce((s, l) => s + (l.variant?.price ?? 0) * l.item.qty, 0);
-
-  async function fetchOrder(code: string) {
-    const res = await fetch(`/api/orders/${code}`);
-    if (res.ok) setOrder(await res.json());
-  }
 
   async function createPayment() {
     setError("");
@@ -124,19 +120,29 @@ export default function CheckoutPage() {
       }
       if (!data.demo) {
         // PayOS thật: poll trạng thái đơn — webhook sẽ đổi trạng thái khi tiền về.
+        // Chỉ chuyển sang màn hình thành công khi đơn thật sự đã trả
+        // (paid/processing/completed); huỷ hoặc vẫn chờ thì không báo thành công.
         const t = setInterval(async () => {
           const r = await fetch(`/api/orders/${data.orderCode}`);
           if (r.ok) {
             const o = (await r.json()) as Order;
-            if (o.status !== "pending") {
+            if (["paid", "processing", "completed"].includes(o.status)) {
               clearInterval(t);
               setOrder(o);
               cart.clear();
+              setState("done");
+            } else if (o.status === "cancelled") {
+              clearInterval(t);
+              setOrder(o);
               setState("done");
             }
           }
         }, 3000);
         setTimeout(() => clearInterval(t), 15 * 60 * 1000);
+      } else {
+        // PayOS chưa cấu hình: không có mã QR thật — báo rõ để liên hệ shop.
+        setError("Thanh toán chưa khả dụng — liên hệ shop để được hỗ trợ.");
+        setState("form");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Lỗi tạo đơn");
@@ -144,30 +150,70 @@ export default function CheckoutPage() {
     }
   }
 
-  async function simulatePaid() {
-    if (!payInfo?.orderCode || simulating) return;
-    setSimulating(true);
-    setError("");
-    try {
-      const res = await fetch("/api/payos/webhook", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ demo: true, orderCode: payInfo.orderCode }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Mô phỏng thanh toán thất bại");
-        return;
-      }
-      setOrder(data.order);
+  // Khách bấm "Tôi đã chuyển khoản": kiểm tra trạng thái thật của đơn rồi
+  // mới báo thành công — trước đây bấm là báo thành công dù tiền chưa về.
+  async function checkPaid() {
+    if (!payInfo?.orderCode) return;
+    const r = await fetch(`/api/orders/${payInfo.orderCode}`);
+    if (!r.ok) return;
+    const o = (await r.json()) as Order;
+    if (["paid", "processing", "completed"].includes(o.status)) {
+      setOrder(o);
       cart.clear();
       setState("done");
-    } finally {
-      setSimulating(false);
+    } else if (o.status === "cancelled") {
+      setOrder(o);
+      setState("done");
+    } else {
+      setCheckMsg("Hệ thống chưa thấy tiền về — đợi thêm vài giây rồi bấm lại.");
     }
   }
 
   if (state === "done" && order) {
+    // Màn hình kết thúc phải theo trạng thái THẬT của đơn — không báo thành
+    // công khi đơn vẫn đang chờ tiền về.
+    if (order.status === "cancelled") {
+      return (
+        <div className="max-w-3xl mx-auto px-4 mt-8">
+          <Steps current={3} />
+          <div className="vd-card border-red-500/50 p-6 mt-6">
+            <h1 className="text-2xl font-bold text-red-400">Đơn đã huỷ</h1>
+            <p className="mt-1">
+              Mã đơn: <b className="font-mono">{order.code}</b> — Tổng: <b>{formatVND(order.total)}</b>
+            </p>
+            <p className="text-sm vd-muted mt-2">Đơn này đã bị huỷ, tiền (nếu đã chuyển) sẽ được PayOS hoàn lại theo quy định ngân hàng.</p>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => router.push("/san-pham")} className="rounded-xl bg-brand-600 hover:bg-brand-700 px-5 py-2.5 font-semibold text-white">
+                Tiếp tục mua sắm
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (order.status === "pending") {
+      return (
+        <div className="max-w-3xl mx-auto px-4 mt-8">
+          <Steps current={2} />
+          <div className="vd-card border-amber-500/50 p-6 mt-6">
+            <h1 className="text-2xl font-bold text-amber-300">Đang chờ xác nhận thanh toán</h1>
+            <p className="mt-1">
+              Mã đơn: <b className="font-mono">{order.code}</b> — Tổng: <b>{formatVND(order.total)}</b>
+            </p>
+            <p className="text-sm vd-muted mt-2">Hệ thống chưa thấy tiền về cho đơn này. Nếu bạn đã chuyển khoản, đợi thêm vài giây rồi bấm kiểm tra lại.</p>
+            {checkMsg && <p role="alert" className="rounded-xl bg-amber-500/10 border border-amber-500/40 px-3 py-2.5 text-sm font-semibold text-amber-300 mt-3">{checkMsg}</p>}
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => void checkPaid()} className="rounded-xl bg-brand-600 hover:bg-brand-700 px-5 py-2.5 font-semibold text-white">
+                Kiểm tra lại
+              </button>
+              <button onClick={() => router.push("/tai-khoan?tab=orders")} className="rounded-xl border vd-border px-5 py-2.5 font-semibold">
+                Xem đơn hàng của tôi
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="max-w-3xl mx-auto px-4 mt-8">
         <Steps current={3} />
@@ -261,36 +307,25 @@ export default function CheckoutPage() {
           Mở trang thanh toán PayOS
         </a>
         <p className="text-xs vd-muted2 mt-3">Đang chờ tiền về… trang này sẽ tự chuyển khi đơn được xác nhận.</p>
-        <button onClick={() => fetchOrder(payInfo.orderCode).then(() => setState("done"))} className="mt-3 text-sm text-brand-400 underline">
+        <button onClick={() => void checkPaid()} className="mt-3 text-sm text-brand-400 underline">
           Tôi đã chuyển khoản — kiểm tra đơn
         </button>
+        {checkMsg && <p role="alert" className="rounded-xl bg-amber-500/10 border border-amber-500/40 px-3 py-2.5 text-sm font-semibold text-amber-300 mt-3">{checkMsg}</p>}
       </div>
     );
   }
 
-  // Chế độ demo: hiện thông tin chuyển khoản MB Bank + nút mô phỏng
+  // PayOS chưa cấu hình thì không có mã QR thật — báo rõ, không hiện màn hình demo.
   if (state === "paying" && payInfo?.demo) {
     return (
-      <div className="max-w-lg mx-auto px-4 mt-8">
-        <div className="rounded-2xl bg-amber-500/10 border border-amber-500/40 p-5">
-          <h1 className="text-xl font-bold text-amber-300">Chế độ demo — chưa cấu hình PayOS</h1>
-          <p className="text-sm  mt-2">
-            Đơn <b className="font-mono">{payInfo.orderCode}</b> — tổng <b>{formatVND(payInfo.amount)}</b>. Khi có PayOS thật,
-            khách sẽ thấy mã VietQR động ở đây. Hiện tại chuyển khoản tay theo thông tin dưới (demo):
-          </p>
-          <div className="mt-3 text-sm space-y-1 vd-surface2 rounded-xl p-4">
-            <p>Ngân hàng: <b>{payInfo.bank.name}</b></p>
-            <p>Số tài khoản: <b className="font-mono">{payInfo.bank.account}</b></p>
-            <p>Chủ TK: <b>{payInfo.bank.accountName}</b></p>
-            <p>Nội dung: <b className="font-mono">{payInfo.content}</b></p>
-          </div>
-          <button onClick={simulatePaid} disabled={simulating} className="mt-4 w-full rounded-xl bg-brand-600 hover:bg-brand-700 py-3 font-bold text-white disabled:opacity-50 inline-flex items-center justify-center gap-2">
-            {simulating && <Loader2 size={17} className="animate-spin" aria-hidden="true" />}
-            {simulating ? "Đang mô phỏng…" : "Mô phỏng: tôi đã chuyển khoản"}
-          </button>
-          {error && <p role="alert" className="rounded-xl bg-red-500/10 border border-red-500/40 px-3 py-2.5 text-sm font-semibold text-red-400 mt-3">{error}</p>}
-          <p className="text-xs vd-muted2 mt-2">Nút này gọi webhook demo để thử luồng giao hàng tự động.</p>
-        </div>
+      <div className="max-w-lg mx-auto px-4 mt-8 text-center">
+        <h1 className="text-2xl font-bold">Thanh toán chưa khả dụng</h1>
+        <p className="vd-muted mt-2">
+          Đơn <b className="font-mono">{payInfo.orderCode}</b> — tổng <b>{formatVND(payInfo.amount)}</b> đã được tạo nhưng hệ thống thanh toán chưa sẵn sàng. Liên hệ shop để được hỗ trợ.
+        </p>
+        <button onClick={() => router.push("/tai-khoan?tab=orders")} className="mt-5 rounded-xl bg-brand-600 hover:bg-brand-700 px-5 py-2.5 font-semibold text-white">
+          Xem đơn hàng của tôi
+        </button>
       </div>
     );
   }
@@ -378,20 +413,51 @@ export default function CheckoutPage() {
           <div className="vd-card p-5">
             <h2 className="font-bold mb-3">Đơn hàng của bạn</h2>
             <div className="space-y-3">
-              {lines.map(({ item, product, variant }) => (
-                <div key={item.variantId} className="flex items-center gap-3">
-                  <ProductImage product={product!} className="h-12 w-12 rounded-xl shrink-0" textSize="text-base" />
-                  <span className="min-w-0 flex-1 text-sm">
-                    {product!.name} — {variant!.label} × {item.qty}
-                  </span>
-                  <b className="shrink-0 text-sm">{formatVND(variant!.price * item.qty)}</b>
+              {lines.map(({ item, product, variant }) => {
+                const onSale = variant!.original_price > variant!.price;
+                const salePct = onSale ? Math.round((1 - variant!.price / variant!.original_price) * 100) : 0;
+                return (
+                  <div key={item.variantId} className="flex items-center gap-3">
+                    <ProductImage product={product!} className="h-12 w-12 rounded-xl shrink-0" textSize="text-base" />
+                    <span className="min-w-0 flex-1 text-sm">
+                      <span className="block truncate font-semibold">{product!.name} — {variant!.label}</span>
+                      <span className="vd-muted">
+                        {formatVND(variant!.price)}
+                        {onSale && (
+                          <>
+                            <span className="line-through ml-2">{formatVND(variant!.original_price)}</span>
+                            <span className="ml-2 rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-xs font-bold">-{salePct}%</span>
+                          </>
+                        )}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => cart.setQty(item.variantId, item.qty - 1)} aria-label={`Giảm số lượng ${product!.name}`} className="flex h-8 w-8 items-center justify-center rounded-lg vd-surface2 border vd-border font-bold">−</button>
+                      <span className="w-5 text-center text-sm font-semibold">{item.qty}</span>
+                      <button onClick={() => cart.setQty(item.variantId, item.qty + 1)} aria-label={`Tăng số lượng ${product!.name}`} className="flex h-8 w-8 items-center justify-center rounded-lg vd-surface2 border vd-border font-bold">+</button>
+                    </span>
+                    <b className="shrink-0 text-sm w-20 text-right">{formatVND(variant!.price * item.qty)}</b>
+                    <button onClick={() => cart.remove(item.variantId)} aria-label={`Xoá ${product!.name} khỏi đơn`} className="shrink-0 vd-muted hover:text-red-400 text-lg font-bold leading-none">✕</button>
+                  </div>
+                );
+              })}
+            </div>
+            {(() => {
+              const originalTotal = lines.reduce((s, l) => s + (l.variant?.original_price ?? l.variant?.price ?? 0) * l.item.qty, 0);
+              const savings = originalTotal - total;
+              return (
+                <div className="border-t vd-border mt-3 pt-3 space-y-1 text-sm">
+                  <div className="flex justify-between vd-muted"><span>Tạm tính</span><span>{formatVND(originalTotal)}</span></div>
+                  {savings > 0 && (
+                    <div className="flex justify-between text-emerald-300"><span>Giảm giá</span><span>−{formatVND(savings)}</span></div>
+                  )}
+                  <div className="flex justify-between font-bold text-base pt-1">
+                    <span>Tổng thanh toán</span>
+                    <span className="text-brand-400">{formatVND(total)}</span>
+                  </div>
                 </div>
-              ))}
-            </div>
-            <div className="border-t vd-border mt-3 pt-3 flex justify-between font-bold">
-              <span>Tổng thanh toán</span>
-              <span className="text-brand-400">{formatVND(total)}</span>
-            </div>
+              );
+            })()}
           </div>
         </div>
       )}

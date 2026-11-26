@@ -20,6 +20,8 @@ export default function CartPage() {
     .filter((l) => l.product && l.variant);
 
   const total = lines.reduce((s, l) => s + (l.variant?.price ?? 0) * l.item.qty, 0);
+  const originalTotal = lines.reduce((s, l) => s + (l.variant?.original_price ?? l.variant?.price ?? 0) * l.item.qty, 0);
+  const savings = originalTotal - total;
 
   if (lines.length === 0) {
     return (
@@ -51,7 +53,12 @@ export default function CartPage() {
               <div className="text-sm vd-muted">
                 {formatVND(variant!.price)}
                 {variant!.original_price > variant!.price && (
-                  <span className="line-through ml-2">{formatVND(variant!.original_price)}</span>
+                  <>
+                    <span className="line-through ml-2">{formatVND(variant!.original_price)}</span>
+                    <span className="ml-2 rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-xs font-bold">
+                      -{Math.round((1 - variant!.price / variant!.original_price) * 100)}%
+                    </span>
+                  </>
                 )}
               </div>
             </div>
@@ -71,7 +78,9 @@ export default function CartPage() {
       </div>
       <div className="mt-6 flex items-center justify-between vd-card p-4">
         <div>
-          <div className="text-sm vd-muted">Tổng thanh toán</div>
+          <div className="text-sm vd-muted">Tạm tính: {formatVND(originalTotal)}</div>
+          {savings > 0 && <div className="text-sm font-semibold text-emerald-300">Tiết kiệm: −{formatVND(savings)}</div>}
+          <div className="text-sm vd-muted mt-1">Tổng thanh toán</div>
           <div className="text-2xl font-black text-brand-400">{formatVND(total)}</div>
         </div>
         <Link href="/thanh-toan" className="rounded-xl bg-brand-600 hover:bg-brand-700 px-6 py-3 font-bold text-white">
