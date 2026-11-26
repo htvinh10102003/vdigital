@@ -171,6 +171,9 @@ export default function AdminPage() {
 
   const [editId, setEditId] = useState<string | null>(null);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
+  // Popup sửa/thêm biến thể: mở từ bảng gói gọn, lưu mới áp vào sản phẩm.
+  const [variantModal, setVariantModal] = useState<{ index: number | null } | null>(null);
+  const [variantDraft, setVariantDraft] = useState<Variant | null>(null);
   const [stockVariant, setStockVariant] = useState("");
   const [stockCodes, setStockCodes] = useState("");
 
@@ -266,11 +269,11 @@ export default function AdminPage() {
 
   // Cảnh báo kho: gói sắp hết mã (còn <= 3) — tính thật từ stock_rows.
   const lowStock = useMemo(() => {
-    const byVariant = new Map<string, { product: string; variant: string; remaining: number }>();
+    const byVariant = new Map<string, { product: string; variant: string; variantId: string; remaining: number }>();
     for (const p of catalog.products) {
       for (const v of p.variants) {
         if (v.fulfillment_type === "auto" || v.fulfillment_type === "link") {
-          byVariant.set(v.id, { product: p.name, variant: v.label, remaining: 0 });
+          byVariant.set(v.id, { product: p.name, variant: v.label, variantId: v.id, remaining: 0 });
         }
       }
     }
@@ -282,6 +285,36 @@ export default function AdminPage() {
     }
     return [...byVariant.values()].filter((v) => v.remaining <= LOW_STOCK_AT);
   }, [catalog.products, stockRows]);
+
+  // Hộp "Cần chú ý" gọn: mặc định chỉ hiện tóm tắt theo sản phẩm,
+  // bấm mới mở chi tiết từng gói + nút thêm mã nhanh.
+  const [lowStockOpen, setLowStockOpen] = useState(false);
+  const [lowStockProduct, setLowStockProduct] = useState<string | null>(null);
+
+  // Tóm tắt kho theo gói: tổng / đã dùng / còn lại (tính thật từ stock_rows).
+  // PHẢI đặt trước các early return bên dưới (auth.loading / !user /
+  // !isAdmin): hook mà nằm sau early return thì số hook thay đổi giữa
+  // các lần render và React ném lỗi #310 khi vào /admin.
+  const autoVariants = catalog.products.flatMap((p) =>
+    p.variants.filter((v) => v.fulfillment_type === "auto" || v.fulfillment_type === "link").map((v) => ({ product: p, variant: v })),
+  );
+  const stockSummary = useMemo(() => {
+    const map = new Map<string, { product: string; variant: string; total: number; used: number; remaining: number; demo: number }>();
+    for (const { product, variant } of autoVariants) {
+      map.set(variant.id, { product: product.name, variant: variant.label, total: 0, used: 0, remaining: 0, demo: 0 });
+    }
+    for (const r of stockRows) {
+      const cur = map.get(r.variant_id);
+      if (!cur) continue;
+      cur.total += 1;
+      if (r.is_used) cur.used += 1;
+      else {
+        cur.remaining += 1;
+        if (r.is_demo) cur.demo += 1;
+      }
+    }
+    return [...map.values()];
+  }, [autoVariants, stockRows]);
 
   async function adminAction(action: string, orderCode: string, itemId: string, extra: Record<string, string> = {}) {
     const key = `${action}:${itemId}`;
@@ -535,9 +568,6 @@ export default function AdminPage() {
     );
   }
 
-  const autoVariants = catalog.products.flatMap((p) =>
-    p.variants.filter((v) => v.fulfillment_type === "auto" || v.fulfillment_type === "link").map((v) => ({ product: p, variant: v })),
-  );
   const cats = editCats ?? catalog.categories;
   const banners = editBanners ?? catalog.banners;
   const faqs = editFaqs ?? catalog.faqs;
@@ -551,25 +581,6 @@ export default function AdminPage() {
     }
     return true;
   });
-
-  // Tóm tắt kho theo gói: tổng / đã dùng / còn lại (tính thật từ stock_rows).
-  const stockSummary = useMemo(() => {
-    const map = new Map<string, { product: string; variant: string; total: number; used: number; remaining: number; demo: number }>();
-    for (const { product, variant } of autoVariants) {
-      map.set(variant.id, { product: product.name, variant: variant.label, total: 0, used: 0, remaining: 0, demo: 0 });
-    }
-    for (const r of stockRows) {
-      const cur = map.get(r.variant_id);
-      if (!cur) continue;
-      cur.total += 1;
-      if (r.is_used) cur.used += 1;
-      else {
-        cur.remaining += 1;
-        if (r.is_demo) cur.demo += 1;
-      }
-    }
-    return [...map.values()];
-  }, [autoVariants, stockRows]);
 
   const filteredStockRows = stockRows.filter((r) => {
     if (stockFilterVariant && r.variant_id !== stockFilterVariant) return false;
@@ -640,15 +651,69 @@ export default function AdminPage() {
             <StatCard label="Lượt xem 30 ngày" value={String(insights?.pageViews.last30 ?? 0)} />
           </div>
           {(lowStock.length > 0 || stats.demoCodes > 0) && (
-            <div className="rounded-2xl border border-amber-500/50 bg-amber-500/10 p-4 text-sm space-y-1">
-              <p className="font-bold text-amber-300">Cần chú ý</p>
-              {lowStock.map((v) => (
-                <p key={v.product + v.variant}>
-                  Kho sắp hết: <b>{v.product} — {v.variant}</b> còn {v.remaining} mã. Bổ sung ở tab Kho mã.
+            <div className="rounded-2xl border border-amber-500/50 bg-amber-500/10 p-4 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-bold text-amber-300">
+                  Cần chú ý
+                  {lowStock.length > 0 && (
+                    <span className="font-normal text-amber-200/90"> — {lowStock.length} gói sắp hết mã (≤ {LOW_STOCK_AT} mã)</span>
+                  )}
                 </p>
-              ))}
+                {lowStock.length > 0 && (
+                  <button onClick={() => setLowStockOpen(!lowStockOpen)} className="btn-outline !py-1.5 !px-3 text-xs">
+                    {lowStockOpen ? "Thu gọn" : "Xem chi tiết"}
+                  </button>
+                )}
+              </div>
+              {lowStockOpen &&
+                (() => {
+                  const groups = new Map<string, typeof lowStock>();
+                  for (const v of lowStock) {
+                    const g = groups.get(v.product) ?? [];
+                    g.push(v);
+                    groups.set(v.product, g);
+                  }
+                  return [...groups.entries()].map(([product, items]) => {
+                    const minRemaining = Math.min(...items.map((i) => i.remaining));
+                    const expanded = lowStockProduct === product;
+                    return (
+                      <div key={product} className="mt-2 rounded-xl bg-amber-500/10 px-3 py-2">
+                        <button
+                          className="w-full flex flex-wrap items-center justify-between gap-2 text-left"
+                          onClick={() => setLowStockProduct(expanded ? null : product)}
+                        >
+                          <span>
+                            <b>{product}</b>
+                            <span className="vd-muted"> — {items.length} gói sắp hết, ít nhất còn {minRemaining} mã</span>
+                          </span>
+                          <span className="text-xs vd-muted">{expanded ? "Thu gọn" : "Chi tiết"}</span>
+                        </button>
+                        {expanded && (
+                          <div className="mt-2 space-y-1.5 border-t border-amber-500/20 pt-2">
+                            {items.map((v) => (
+                              <div key={v.variantId} className="flex flex-wrap items-center justify-between gap-2">
+                                <span>
+                                  {v.variant} — còn <b>{v.remaining} mã</b>
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    setStockVariant(v.variantId);
+                                    setTab("stock");
+                                  }}
+                                  className="rounded-lg bg-amber-500 hover:bg-amber-400 px-3 py-1.5 text-xs font-bold text-black"
+                                >
+                                  + Thêm mã
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
               {stats.demoCodes > 0 && (
-                <p>
+                <p className="mt-2">
                   Còn <b>{stats.demoCodes} mã demo (VD-DEMO-)</b> chưa dùng trong kho — thay bằng mã thật trước khi bán.
                 </p>
               )}
@@ -857,146 +922,70 @@ export default function AdminPage() {
                 </div>
 
                 <h4 className="font-bold pt-2">Các gói (biến thể) — mỗi gói có cách giao riêng</h4>
-                <div className="space-y-3">
-                  {editProduct.variants.map((v, i) => {
-                    const setV = (patch: Partial<Variant>) => {
-                      const vs = [...editProduct.variants];
-                      vs[i] = { ...v, ...patch };
-                      setEditProduct({ ...editProduct, variants: vs });
-                    };
-                    return (
-                      <div key={v.id} className="vd-card-flat p-3 space-y-2">
-                        <div className="grid grid-cols-1 min-[560px]:grid-cols-2 gap-2">
-                          <label className="block">
-                            <span className="field-label">Nhãn gói *</span>
-                            <input value={v.label} onChange={(e) => setV({ label: e.target.value, name: e.target.value })} className="field" />
-                          </label>
-                          <label className="block">
-                            <span className="field-label">Giá bán (đ)</span>
-                            <input type="number" value={v.price} onChange={(e) => setV({ price: Number(e.target.value) })} className="field" />
-                          </label>
-                          <label className="block">
-                            <span className="field-label">Giá gốc (đ)</span>
-                            <input type="number" value={v.original_price} onChange={(e) => setV({ original_price: Number(e.target.value) })} className="field" />
-                          </label>
-                          <label className="block">
-                            <span className="field-label">Tồn kho (trống = không giới hạn)</span>
-                            <input type="number" value={v.stock_count ?? ""} onChange={(e) => setV({ stock_count: e.target.value === "" ? null : Number(e.target.value) })} className="field" placeholder="Không giới hạn" />
-                          </label>
-                        </div>
-                        <div className="grid grid-cols-1 min-[560px]:grid-cols-2 gap-2">
-                          <label className="block">
-                            <span className="field-label">Loại lựa chọn</span>
-                            <select value={v.option_type} onChange={(e) => setV({ option_type: e.target.value as never })} className="field">
-                              {OPTION_TYPES.map((t) => (
-                                <option key={t.value} value={t.value}>{t.label}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="block">
-                            <span className="field-label">Nhãn nhóm lựa chọn (tuỳ chọn)</span>
-                            <input value={v.option_label ?? ""} onChange={(e) => setV({ option_label: e.target.value || null })} className="field" placeholder="vd: Chọn mệnh giá" />
-                          </label>
-                          <label className="block">
-                            <span className="field-label">Cách giao hàng</span>
-                            <select value={v.fulfillment_type} onChange={(e) => setV({ fulfillment_type: e.target.value as never })} className="field">
-                              {FULFILLMENT_TYPES.map((t) => (
-                                <option key={t.value} value={t.value}>{t.label}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="block">
-                            <span className="field-label">Hết Flash lúc (để trống = không)</span>
-                            <input
-                              type="datetime-local"
-                              value={v.flash_ends_at ? v.flash_ends_at.slice(0, 16) : ""}
-                              onChange={(e) => setV({ is_flash: !!e.target.value, flash_ends_at: e.target.value ? new Date(e.target.value).toISOString() : null })}
-                              className="field"
-                            />
-                          </label>
-                        </div>
-                        {(v.fulfillment_type === "link" || v.fulfillment_type === "auto") && (
-                          <label className="block">
-                            <span className="field-label">Mẫu giao hàng (chỉ cho loại “Link / key” — có thể chứa {"{code}"})</span>
-                            <input value={v.delivery_template ?? ""} onChange={(e) => setV({ delivery_template: e.target.value || null })} className="field" placeholder="vd: https://example.com/activate?key={code}" />
-                          </label>
-                        )}
-                        <label className="block">
-                          <span className="field-label">Ghi chú giao hàng cho gói này</span>
-                          <input value={v.delivery_note ?? ""} onChange={(e) => setV({ delivery_note: e.target.value || null })} className="field" placeholder="vd: Dùng email của bạn để nhận lời mời Family" />
-                        </label>
-                        {/* Thông tin khách cần cung cấp — chỉ cho gói làm tay. */}
-                        {v.fulfillment_type === "manual" && (
-                          <div className="rounded-xl border vd-border p-3 space-y-2">
-                            <p className="font-semibold text-sm">Thông tin khách cần cung cấp <span className="vd-muted font-normal">(hiện ở trang thanh toán khi mua gói này)</span></p>
-                            {(v.manual_fields ?? []).map((f: ManualField, fi: number) => {
-                              const setF = (patch: Partial<ManualField>) => {
-                                const fields = [...(v.manual_fields ?? [])];
-                                fields[fi] = { ...f, ...patch };
-                                setV({ manual_fields: fields });
-                              };
-                              return (
-                                <div key={f.id} className="grid grid-cols-1 sm:grid-cols-[1fr_130px_auto_auto] gap-2 items-end">
-                                  <label className="block">
-                                    <span className="field-label">Nhãn ô *</span>
-                                    <input value={f.label} onChange={(e) => setF({ label: e.target.value })} className="field" placeholder="vd: Email cần add vào Family" />
-                                  </label>
-                                  <label className="block">
-                                    <span className="field-label">Loại</span>
-                                    <select value={f.type} onChange={(e) => setF({ type: e.target.value as ManualField["type"] })} className="field">
-                                      <option value="text">Chữ</option>
-                                      <option value="email">Email</option>
-                                      <option value="number">Số</option>
-                                      <option value="textarea">Đoạn dài</option>
-                                    </select>
-                                  </label>
-                                  <label className="flex items-center gap-2 text-sm pb-2.5">
-                                    <input type="checkbox" checked={f.required} onChange={(e) => setF({ required: e.target.checked })} className="accent-violet-600" /> Bắt buộc
-                                  </label>
-                                  <button type="button" onClick={() => setV({ manual_fields: (v.manual_fields ?? []).filter((x) => x.id !== f.id) })} className="text-sm text-red-400 hover:underline pb-2.5">
-                                    Xoá
-                                  </button>
-                                  <label className="block sm:col-span-4">
-                                    <span className="field-label">Gợi ý (placeholder)</span>
-                                    <input value={f.placeholder ?? ""} onChange={(e) => setF({ placeholder: e.target.value })} className="field" placeholder="vd: ban@gmail.com" />
-                                  </label>
-                                </div>
-                              );
-                            })}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead>
+                      <tr className="border-b vd-border vd-muted">
+                        <th className="py-2 pr-2 font-semibold">Gói</th>
+                        <th className="py-2 pr-2 font-semibold">Giá bán</th>
+                        <th className="py-2 pr-2 font-semibold">Cách giao</th>
+                        <th className="py-2 pr-2 font-semibold">Trạng thái</th>
+                        <th className="py-2 text-right font-semibold"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editProduct.variants.map((v, i) => (
+                        <tr key={v.id} className="border-b vd-border">
+                          <td className="py-2 pr-2">
+                            <b>{v.label}</b>
+                            {(v.manual_fields ?? []).length > 0 && (
+                              <span className="block text-xs vd-muted">+ {(v.manual_fields ?? []).length} ô thông tin khách</span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-2 whitespace-nowrap">
+                            {formatVND(v.price)}
+                            {v.original_price > v.price && (
+                              <span className="block text-xs vd-muted line-through">{formatVND(v.original_price)}</span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-2">{FULFILLMENT_TYPES.find((t) => t.value === v.fulfillment_type)?.label ?? v.fulfillment_type}</td>
+                          <td className="py-2 pr-2">
+                            {v.is_flash && <span className="text-xs rounded-full bg-amber-500/15 text-amber-300 px-2 py-0.5 mr-1">Flash</span>}
+                            <span className="text-xs">{v.is_active ? "Đang bán" : "Đã ẩn"}</span>
+                          </td>
+                          <td className="py-2 text-right whitespace-nowrap">
                             <button
                               type="button"
-                              onClick={() =>
-                                setV({
-                                  manual_fields: [
-                                    ...(v.manual_fields ?? []),
-                                    { id: `mf-${Date.now()}`, label: "", type: "text", required: true, placeholder: "" },
-                                  ],
-                                })
-                              }
-                              className="btn-outline !py-1.5 text-xs"
+                              onClick={() => {
+                                setVariantDraft(JSON.parse(JSON.stringify(v)));
+                                setVariantModal({ index: i });
+                              }}
+                              className="text-sm font-semibold text-brand-400 hover:underline mr-3"
                             >
-                              + Thêm ô thông tin
+                              Sửa
                             </button>
-                          </div>
-                        )}
-                        <div className="flex flex-wrap items-center gap-4 text-sm">
-                          <label className="flex items-center gap-2"><input type="checkbox" checked={v.is_flash} onChange={(e) => setV({ is_flash: e.target.checked })} className="accent-violet-600" /> Flash Sale</label>
-                          <label className="flex items-center gap-2"><input type="checkbox" checked={v.is_active} onChange={(e) => setV({ is_active: e.target.checked })} className="accent-violet-600" /> Đang bán</label>
-                          <button
-                            type="button"
-                            onClick={() => setEditProduct({ ...editProduct, variants: editProduct.variants.filter((x) => x.id !== v.id) })}
-                            className="ml-auto text-sm text-red-400 hover:underline"
-                          >
-                            Xoá gói
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                            <button
+                              type="button"
+                              onClick={() => setEditProduct({ ...editProduct, variants: editProduct.variants.filter((x) => x.id !== v.id) })}
+                              className="text-sm text-red-400 hover:underline"
+                            >
+                              Xoá
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {editProduct.variants.length === 0 && (
+                    <p className="vd-muted text-sm py-3">Chưa có gói nào — bấm “+ Thêm gói” để tạo gói đầu tiên.</p>
+                  )}
                 </div>
                 <button
                   type="button"
-                  onClick={() => setEditProduct({ ...editProduct, variants: [...editProduct.variants, newVariant(editProduct.id, editProduct.variants.length + 1)] })}
+                  onClick={() => {
+                    setVariantDraft(newVariant(editProduct.id, editProduct.variants.length + 1));
+                    setVariantModal({ index: null });
+                  }}
                   className="btn-outline !py-2 text-sm"
                 >
                   + Thêm gói
@@ -1009,6 +998,185 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Popup sửa/thêm biến thể — chỉ mở khi bấm Sửa / + Thêm gói ở bảng trên. */}
+      {variantModal && variantDraft && editProduct && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4" role="dialog" aria-modal="true">
+          <div className="vd-card w-full max-w-2xl p-5 my-8 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-display font-bold text-lg">
+                {variantModal.index === null ? "Thêm gói mới" : `Sửa gói: ${variantDraft.label || "chưa đặt tên"}`}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setVariantModal(null); setVariantDraft(null); }}
+                className="rounded-lg vd-card-flat px-3 py-1.5 text-sm font-bold"
+                aria-label="Đóng"
+              >
+                ✕
+              </button>
+            </div>
+            {(() => {
+              const v = variantDraft;
+              const setV = (patch: Partial<Variant>) => setVariantDraft({ ...variantDraft, ...patch });
+              return (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="field-label">Nhãn gói *</span>
+                      <input value={v.label} onChange={(e) => setV({ label: e.target.value, name: e.target.value })} className="field" />
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Giá bán (đ)</span>
+                      <input type="number" value={v.price} onChange={(e) => setV({ price: Number(e.target.value) })} className="field" />
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Giá gốc (đ)</span>
+                      <input type="number" value={v.original_price} onChange={(e) => setV({ original_price: Number(e.target.value) })} className="field" />
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Tồn kho (trống = không giới hạn)</span>
+                      <input type="number" value={v.stock_count ?? ""} onChange={(e) => setV({ stock_count: e.target.value === "" ? null : Number(e.target.value) })} className="field" placeholder="Không giới hạn" />
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Loại lựa chọn</span>
+                      <select value={v.option_type} onChange={(e) => setV({ option_type: e.target.value as never })} className="field">
+                        {OPTION_TYPES.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Nhãn nhóm lựa chọn (tuỳ chọn)</span>
+                      <input value={v.option_label ?? ""} onChange={(e) => setV({ option_label: e.target.value || null })} className="field" placeholder="vd: Chọn mệnh giá" />
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Cách giao hàng</span>
+                      <select value={v.fulfillment_type} onChange={(e) => setV({ fulfillment_type: e.target.value as never })} className="field">
+                        {FULFILLMENT_TYPES.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Hết Flash lúc (để trống = không)</span>
+                      <input
+                        type="datetime-local"
+                        value={v.flash_ends_at ? v.flash_ends_at.slice(0, 16) : ""}
+                        onChange={(e) => setV({ is_flash: !!e.target.value, flash_ends_at: e.target.value ? new Date(e.target.value).toISOString() : null })}
+                        className="field"
+                      />
+                    </label>
+                  </div>
+                  {(v.fulfillment_type === "link" || v.fulfillment_type === "auto") && (
+                    <label className="block">
+                      <span className="field-label">Mẫu giao hàng (chỉ cho loại “Link / key” — có thể chứa {"{code}"})</span>
+                      <input value={v.delivery_template ?? ""} onChange={(e) => setV({ delivery_template: e.target.value || null })} className="field" placeholder="vd: https://example.com/activate?key={code}" />
+                    </label>
+                  )}
+                  <label className="block">
+                    <span className="field-label">Ghi chú giao hàng cho gói này</span>
+                    <input value={v.delivery_note ?? ""} onChange={(e) => setV({ delivery_note: e.target.value || null })} className="field" placeholder="vd: Dùng email của bạn để nhận lời mời Family" />
+                  </label>
+                  {v.fulfillment_type === "manual" && (
+                    <div className="rounded-xl border vd-border p-3 space-y-2">
+                      <p className="font-semibold text-sm">Thông tin khách cần cung cấp <span className="vd-muted font-normal">(hiện ở trang thanh toán khi mua gói này)</span></p>
+                      {(v.manual_fields ?? []).map((f: ManualField, fi: number) => {
+                        const setF = (patch: Partial<ManualField>) => {
+                          const fields = [...(v.manual_fields ?? [])];
+                          fields[fi] = { ...f, ...patch };
+                          setV({ manual_fields: fields });
+                        };
+                        return (
+                          <div key={f.id} className="grid grid-cols-1 sm:grid-cols-[1fr_130px_auto_auto] gap-2 items-end">
+                            <label className="block">
+                              <span className="field-label">Nhãn ô *</span>
+                              <input value={f.label} onChange={(e) => setF({ label: e.target.value })} className="field" placeholder="vd: Email cần add vào Family" />
+                            </label>
+                            <label className="block">
+                              <span className="field-label">Loại</span>
+                              <select value={f.type} onChange={(e) => setF({ type: e.target.value as ManualField["type"] })} className="field">
+                                <option value="text">Chữ</option>
+                                <option value="email">Email</option>
+                                <option value="number">Số</option>
+                                <option value="textarea">Đoạn dài</option>
+                              </select>
+                            </label>
+                            <label className="flex items-center gap-2 text-sm pb-2.5">
+                              <input type="checkbox" checked={f.required} onChange={(e) => setF({ required: e.target.checked })} className="accent-violet-600" /> Bắt buộc
+                            </label>
+                            <button type="button" onClick={() => setV({ manual_fields: (v.manual_fields ?? []).filter((x) => x.id !== f.id) })} className="text-sm text-red-400 hover:underline pb-2.5">
+                              Xoá
+                            </button>
+                            <label className="block sm:col-span-4">
+                              <span className="field-label">Gợi ý (placeholder)</span>
+                              <input value={f.placeholder ?? ""} onChange={(e) => setF({ placeholder: e.target.value })} className="field" placeholder="vd: ban@gmail.com" />
+                            </label>
+                          </div>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setV({
+                            manual_fields: [
+                              ...(v.manual_fields ?? []),
+                              { id: `mf-${Date.now()}`, label: "", type: "text", required: true, placeholder: "" },
+                            ],
+                          })
+                        }
+                        className="btn-outline !py-1.5 text-xs"
+                      >
+                        + Thêm ô thông tin
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-4 text-sm">
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={v.is_flash} onChange={(e) => setV({ is_flash: e.target.checked })} className="accent-violet-600" /> Flash Sale</label>
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={v.is_active} onChange={(e) => setV({ is_active: e.target.checked })} className="accent-violet-600" /> Đang bán</label>
+                  </div>
+                </>
+              );
+            })()}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                className="btn-primary !py-2.5 text-sm"
+                onClick={() => {
+                  const vs = [...editProduct.variants];
+                  if (variantModal.index === null) vs.push(variantDraft);
+                  else vs[variantModal.index] = variantDraft;
+                  setEditProduct({ ...editProduct, variants: vs });
+                  setVariantModal(null);
+                  setVariantDraft(null);
+                }}
+              >
+                Lưu gói
+              </button>
+              <button
+                type="button"
+                onClick={() => { setVariantModal(null); setVariantDraft(null); }}
+                className="btn-outline !py-2.5 text-sm"
+              >
+                Huỷ
+              </button>
+              {variantModal.index !== null && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditProduct({ ...editProduct, variants: editProduct.variants.filter((x) => x.id !== variantDraft.id) });
+                    setVariantModal(null);
+                    setVariantDraft(null);
+                  }}
+                  className="ml-auto text-sm text-red-400 hover:underline self-center"
+                >
+                  Xoá gói
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
