@@ -81,7 +81,7 @@ export default function CartPage() {
           <div className="text-sm vd-muted">Tạm tính: {formatVND(originalTotal)}</div>
           {savings > 0 && <div className="text-sm font-semibold text-emerald-300">Tiết kiệm: −{formatVND(savings)}</div>}
           <div className="text-sm vd-muted mt-1">Tổng thanh toán</div>
-          <div className="text-2xl font-black text-brand-400">{formatVND(total)}</div>
+          <div className="text-2xl font-extrabold text-brand-400">{formatVND(total)}</div>
         </div>
         <Link href="/thanh-toan" className="rounded-xl bg-brand-600 hover:bg-brand-700 px-6 py-3 font-bold text-white">
           Thanh toán

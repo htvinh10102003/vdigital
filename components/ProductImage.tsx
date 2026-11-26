@@ -40,7 +40,7 @@ export function ProductImage({ product, className = "", textSize = "text-2xl", p
         }}
       />
       <div className="relative flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-white">
-        <span className={`font-black leading-none drop-shadow ${textSize}`}>{label}</span>
+        <span className={`font-extrabold leading-none drop-shadow ${textSize}`}>{label}</span>
         <span className="text-[11px] font-semibold text-white/90 line-clamp-2 leading-tight">{product.name}</span>
       </div>
     </div>

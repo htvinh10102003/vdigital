@@ -5,9 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { isSupabaseConfigured, useAuth, useCatalog, saveCatalogOverrides } from "@/components/providers";
 import { getSupabase } from "@/lib/supabase";
-import { formatDateTime, formatSold, formatVND, slugify } from "@/lib/format";
-import type { Banner, Category, Faq, ManualField, Order, Product, Variant } from "@/lib/types";
-import { ACCOUNT_TYPES, FULFILLMENT_TYPES, OPTION_TYPES, PRODUCT_TYPES } from "@/lib/types";
+import { formatDate, formatDateTime, formatSold, formatVND, isWithinWarranty, slugify } from "@/lib/format";
+import type { Banner, Category, Complaint, ComplaintStatus, Faq, ManualField, Order, Product, Variant } from "@/lib/types";
+import { ACCOUNT_TYPES, COMPLAINT_REASON_LABELS, COMPLAINT_STATUS_LABELS, FULFILLMENT_TYPES, OPTION_TYPES, PRODUCT_TYPES } from "@/lib/types";
 import { ImageUpload } from "@/components/ImageUpload";
 import {
   DEFAULT_TEMPLATES,
@@ -30,7 +30,7 @@ async function adminHeaders(): Promise<Record<string, string>> {
   return h;
 }
 
-type Tab = "overview" | "orders" | "products" | "stock" | "reports" | "content" | "emails" | "settings" | "vouchers" | "wallet";
+type Tab = "overview" | "orders" | "products" | "stock" | "reports" | "content" | "emails" | "settings" | "vouchers" | "wallet" | "complaints";
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   pending: "Chờ thanh toán",
@@ -209,7 +209,7 @@ function StatCard({ label, value, sub, accent }: { label: string; value: string;
   return (
     <div className="vd-card p-5">
       <div className="text-sm vd-muted">{label}</div>
-      <div className={`font-display text-2xl font-black mt-1 ${accent ?? ""}`}>{value}</div>
+      <div className={`font-display text-2xl font-extrabold mt-1 ${accent ?? ""}`}>{value}</div>
       {sub && <div className="text-xs vd-muted mt-1">{sub}</div>}
     </div>
   );
@@ -283,6 +283,14 @@ export default function AdminPage() {
   const [checkinDaily, setCheckinDaily] = useState("");
   const [checkinSunday, setCheckinSunday] = useState("");
 
+  // Khiếu nại bảo hành (v4.8)
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [complaintsLoading, setComplaintsLoading] = useState(false);
+  const [complaintFilter, setComplaintFilter] = useState("");
+  const [expandedComplaint, setExpandedComplaint] = useState<string | null>(null);
+  const [complaintReply, setComplaintReply] = useState("");
+  const [complaintBusy, setComplaintBusy] = useState(false);
+
   // Ẩn/hiện giá trị mật khẩu trong chi tiết đơn (key `${itemId}:${fieldId}`).
   const [revealedInfo, setRevealedInfo] = useState<Set<string>>(new Set());
 
@@ -323,6 +331,45 @@ export default function AdminPage() {
   async function loadTemplates() {
     const res = await fetch("/api/admin/email-templates", { headers: await adminHeaders() });
     if (res.ok) setTemplates((await res.json()).templates ?? []);
+  }
+
+  // --- Khiếu nại bảo hành (v4.8) ---
+  async function loadComplaints() {
+    setComplaintsLoading(true);
+    try {
+      const res = await fetch("/api/admin/complaints", { headers: await adminHeaders() });
+      if (res.ok) setComplaints(((await res.json()).complaints ?? []) as Complaint[]);
+      else setMsg({ tone: "err", text: "Không tải được danh sách khiếu nại" });
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi tải khiếu nại" });
+    } finally {
+      setComplaintsLoading(false);
+    }
+  }
+
+  async function updateComplaint(c: Complaint, status: ComplaintStatus) {
+    setComplaintBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/complaints", {
+        method: "PATCH",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ id: c.id, status, admin_reply: complaintReply.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Cập nhật khiếu nại thất bại" });
+        return;
+      }
+      setComplaints((prev) => prev.map((x) => (x.id === c.id ? (data.complaint as Complaint) : x)));
+      setExpandedComplaint(null);
+      setComplaintReply("");
+      setMsg({ tone: "ok", text: `Khiếu nại đơn ${c.order_code} đã chuyển sang “${COMPLAINT_STATUS_LABELS[status]}”.` });
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setComplaintBusy(false);
+    }
   }
 
   // --- Voucher / Ví Xu (v4.7) ---
@@ -535,6 +582,7 @@ export default function AdminPage() {
   // Voucher chỉ tải khi mở tab — tránh gọi API chưa có khi không cần.
   useEffect(() => {
     if (auth.isAdmin && tab === "vouchers") loadVouchers();
+    if (auth.isAdmin && tab === "complaints") loadComplaints();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.isAdmin, tab]);
 
@@ -548,6 +596,12 @@ export default function AdminPage() {
     const reviewsTotal = catalog.products.reduce((s, p) => s + p.review_count, 0);
     return { revenue, totalOrders: orders.length, waiting, stockRemaining, demoCodes, reviewsTotal };
   }, [orders, stockRows, catalog.products]);
+
+  // Khiếu nại lọc theo trạng thái (tab Khiếu nại).
+  const filteredComplaints = useMemo(
+    () => (complaintFilter ? complaints.filter((c) => c.status === complaintFilter) : complaints),
+    [complaints, complaintFilter],
+  );
 
   // Cảnh báo kho: gói sắp hết mã (còn <= 3) — tính thật từ stock_rows.
   const lowStock = useMemo(() => {
@@ -862,7 +916,7 @@ export default function AdminPage() {
   if (!auth.user) {
     return (
       <div className="max-w-md mx-auto mt-16 text-center">
-        <h1 className="font-display text-2xl font-black">Quản trị VDigital</h1>
+        <h1 className="font-display text-2xl font-extrabold">Quản trị VDigital</h1>
         <p className="vd-muted mt-2">Khu vực này chỉ dành cho admin. Đăng nhập bằng email admin để tiếp tục.</p>
       </div>
     );
@@ -870,7 +924,7 @@ export default function AdminPage() {
   if (!auth.isAdmin) {
     return (
       <div className="max-w-md mx-auto mt-16 text-center">
-        <h1 className="font-display text-2xl font-black">Không có quyền</h1>
+        <h1 className="font-display text-2xl font-extrabold">Không có quyền</h1>
         <p className="vd-muted mt-2">
           Email {auth.user.email} không nằm trong danh sách admin. Thêm email này vào biến môi trường ADMIN_EMAILS.
         </p>
@@ -904,7 +958,7 @@ export default function AdminPage() {
   return (
     <div>
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="font-display text-2xl font-black tracking-tight">Quản trị VDigital</h1>
+        <h1 className="font-display text-2xl font-extrabold tracking-tight">Quản trị VDigital</h1>
         <span className="text-xs rounded-full vd-card-flat px-3 py-1">
           {isSupabaseConfigured ? "Supabase: đã cấu hình" : "Supabase: chưa cấu hình"}
         </span>
@@ -936,6 +990,7 @@ export default function AdminPage() {
             { key: "emails", label: "Mẫu email" },
             { key: "vouchers", label: "Voucher" },
             { key: "wallet", label: "Ví Xu" },
+            { key: "complaints", label: `Khiếu nại${complaints.filter((c) => c.status === "pending").length > 0 ? ` (${complaints.filter((c) => c.status === "pending").length})` : ""}` },
             { key: "settings", label: "Cài đặt" },
           ] as { key: Tab; label: string }[]
         ).map((t) => (
@@ -1098,6 +1153,15 @@ export default function AdminPage() {
                         {item.delivered_code && <p className="mt-1">Mã đã giao: <code className="font-mono vd-surface2 px-2 py-0.5 rounded">{item.delivered_code}</code></p>}
                         {item.delivered_serial && <p className="mt-1">Serial: <code className="font-mono">{item.delivered_serial}</code> · Mã: <code className="font-mono">{item.delivered_pin}</code></p>}
                         {item.delivered_note && <p className="mt-1 vd-muted">{item.delivered_note}</p>}
+                        {/* Bảo hành gắn đơn (v4.8) — hạn tính từ ngày giao. */}
+                        {item.status === "delivered" && item.warranty_ends_at && (
+                          <p className="mt-1">
+                            Bảo hành đến <b>{formatDate(item.warranty_ends_at)}</b> ·{" "}
+                            <span className={isWithinWarranty(item.warranty_ends_at) ? "text-emerald-300 font-semibold" : "vd-muted"}>
+                              {isWithinWarranty(item.warranty_ends_at) ? "Còn bảo hành" : "Hết bảo hành"}
+                            </span>
+                          </p>
+                        )}
                         {item.customer_info && Object.entries(item.customer_info).filter(([, v]) => String(v ?? "").trim()).length > 0 && (
                           <div className="mt-2 rounded-lg vd-surface2 p-3">
                             <p className="font-semibold text-xs uppercase tracking-wide vd-muted">Thông tin khách đã cung cấp (xử lý tay)</p>
@@ -2326,6 +2390,97 @@ export default function AdminPage() {
               </ActionButton>
             </div>
           </div>
+        </div>
+      )}
+
+      {tab === "complaints" && (
+        <div className="mt-5 space-y-3">
+          <div className="flex flex-wrap gap-2 items-center">
+            <select value={complaintFilter} onChange={(e) => setComplaintFilter(e.target.value)} className="field !w-auto" aria-label="Lọc theo trạng thái">
+              <option value="">Tất cả trạng thái</option>
+              {Object.entries(COMPLAINT_STATUS_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+            <ActionButton busy={complaintsLoading} onClick={loadComplaints} className="btn-outline !py-2 text-sm">
+              {complaintsLoading ? "Đang tải…" : "Tải lại"}
+            </ActionButton>
+            <span className="text-sm vd-muted">{filteredComplaints.length} khiếu nại</span>
+          </div>
+          {filteredComplaints.length === 0 && !complaintsLoading && (
+            <p className="vd-muted">Không có khiếu nại nào khớp bộ lọc.</p>
+          )}
+          {filteredComplaints.map((c) => (
+            <div key={c.id} className="vd-card p-4 text-sm">
+              <button
+                className="w-full flex flex-wrap justify-between gap-2 text-left"
+                onClick={() => {
+                  const opening = expandedComplaint !== c.id;
+                  setExpandedComplaint(opening ? c.id : null);
+                  setComplaintReply(opening ? (c.admin_reply ?? "") : "");
+                }}
+              >
+                <span className="font-mono font-bold">{c.order_code}</span>
+                <span>{c.product_name ?? "Sản phẩm"}</span>
+                <span className="vd-muted">{c.customer_email}</span>
+                <span className="vd-muted">{COMPLAINT_REASON_LABELS[c.reason]}</span>
+                <span className="text-sm vd-muted">{formatDateTime(c.created_at)}</span>
+                <span
+                  className={`text-xs rounded-full px-2 py-1 font-semibold ${
+                    c.status === "resolved"
+                      ? "bg-emerald-500/15 text-emerald-300"
+                      : c.status === "rejected"
+                        ? "bg-red-500/15 text-red-300"
+                        : c.status === "processing"
+                          ? "bg-sky-500/15 text-sky-300"
+                          : "bg-amber-500/15 text-amber-300"
+                  }`}
+                >
+                  {COMPLAINT_STATUS_LABELS[c.status]}
+                </span>
+              </button>
+              {expandedComplaint === c.id && (
+                <div className="mt-3 space-y-3 border-t vd-border pt-3">
+                  <p>
+                    <b>Nội dung khiếu nại:</b> {c.content}
+                  </p>
+                  <label className="block">
+                    <span className="field-label">Lời nhắn cho khách</span>
+                    <textarea
+                      value={complaintReply}
+                      onChange={(e) => setComplaintReply(e.target.value)}
+                      rows={3}
+                      placeholder="vd: Shop đã cấp lại mã mới qua email, bạn kiểm tra giúp shop nhé."
+                      className="field"
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        ["processing", "Đang xử lý"],
+                        ["resolved", "Đã giải quyết"],
+                        ["rejected", "Đã từ chối"],
+                      ] as [ComplaintStatus, string][]
+                    )
+                      .filter(([s]) => s !== c.status)
+                      .map(([s, label]) => (
+                      <ActionButton
+                        key={s}
+                        busy={complaintBusy}
+                        onClick={() => void updateComplaint(c, s)}
+                        className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 ${
+                          s === "resolved" ? "bg-emerald-600 hover:bg-emerald-500" : s === "rejected" ? "bg-red-600 hover:bg-red-500" : "bg-sky-600 hover:bg-sky-500"
+                        }`}
+                      >
+                        {label}
+                      </ActionButton>
+                    ))}
+                  </div>
+                  <p className="text-xs vd-muted">Đổi trạng thái thì chuông của khách báo luôn.</p>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 

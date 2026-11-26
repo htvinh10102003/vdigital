@@ -104,7 +104,7 @@ export function ProductCard({ product }: { product: Product }) {
         <div className="mt-auto pt-1">
           {cheapest && (
             <div className="flex items-baseline gap-2">
-              <span className="font-display text-brand-400 font-black text-lg leading-none">{formatVND(cheapest.price)}</span>
+              <span className="font-display text-brand-400 font-extrabold text-lg leading-none">{formatVND(cheapest.price)}</span>
               {cheapest.original_price > cheapest.price && (
                 <span className="text-xs vd-muted2 line-through">{formatVND(cheapest.original_price)}</span>
               )}

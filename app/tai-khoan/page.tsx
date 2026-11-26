@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CalendarCheck, Check, Clock, Coins, Copy, Loader2, Wallet } from "lucide-react";
+import { CalendarCheck, Check, Clock, Coins, Copy, Loader2, MessageSquareWarning, Wallet } from "lucide-react";
 import { isSupabaseConfigured, useAuth, useToast } from "@/components/providers";
-import { formatDateTime, formatVND } from "@/lib/format";
+import { formatDate, formatDateTime, formatVND, isWithinWarranty } from "@/lib/format";
 import { getAccessToken, WALLET_TX_LABELS, type WalletTransaction } from "@/lib/wallet-client";
-import type { Order } from "@/lib/types";
+import { COMPLAINT_REASONS, COMPLAINT_REASON_LABELS, COMPLAINT_STATUS_LABELS, type Complaint, type ComplaintReason, type Order } from "@/lib/types";
 
 const TOPUP_QUICK = [50_000, 100_000, 200_000, 500_000];
 
@@ -43,6 +43,31 @@ export default function AccountPage() {
   const [checkin, setCheckin] = useState<CheckinStatus | null>(null);
   const [checkinBusy, setCheckinBusy] = useState(false);
   const [checkinMsg, setCheckinMsg] = useState("");
+
+  // --- Khiếu nại bảo hành (v4.8) — chỉ tài khoản thật ---
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [complaintsLoading, setComplaintsLoading] = useState(false);
+  const [complaintItemId, setComplaintItemId] = useState<string | null>(null);
+  const [complaintReason, setComplaintReason] = useState<ComplaintReason>("code_error");
+  const [complaintContent, setComplaintContent] = useState("");
+  const [complaintBusy, setComplaintBusy] = useState(false);
+  const [complaintMsg, setComplaintMsg] = useState("");
+
+  const loadComplaints = useCallback(async () => {
+    const token = await getAccessToken();
+    if (!token) return;
+    setComplaintsLoading(true);
+    try {
+      const res = await fetch("/api/complaints", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setComplaints(((await res.json()).complaints ?? []) as Complaint[]);
+    } catch {
+      /* khiếu nại chưa sẵn sàng: chỉ ẩn phần này */
+    } finally {
+      setComplaintsLoading(false);
+    }
+  }, []);
 
   const loadWallet = useCallback(async () => {
     const token = await getAccessToken();
@@ -81,7 +106,8 @@ export default function AccountPage() {
     if (!hasRealSession) return;
     loadWallet();
     loadCheckin();
-  }, [hasRealSession, loadWallet, loadCheckin]);
+    loadComplaints();
+  }, [hasRealSession, loadWallet, loadCheckin, loadComplaints]);
 
   // Dừng poll nạp tiền khi rời trang.
   useEffect(
@@ -196,6 +222,37 @@ export default function AccountPage() {
       setCheckinMsg(e instanceof Error ? e.message : "Lỗi điểm danh");
     } finally {
       setCheckinBusy(false);
+    }
+  }
+
+  async function submitComplaint(itemId: string) {
+    if (complaintContent.trim().length < 10) {
+      setComplaintMsg("Mô tả khiếu nại tối thiểu 10 ký tự để shop hiểu vấn đề.");
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) {
+      setComplaintMsg("Chưa đăng nhập — đăng nhập lại rồi gửi khiếu nại.");
+      return;
+    }
+    setComplaintBusy(true);
+    setComplaintMsg("");
+    try {
+      const res = await fetch("/api/complaints", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ order_item_id: itemId, reason: complaintReason, content: complaintContent.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Không gửi được khiếu nại");
+      setComplaintMsg("Đã gửi khiếu nại — shop sẽ xử lý và cập nhật tiến trình tại đây.");
+      setComplaintItemId(null);
+      setComplaintContent("");
+      await loadComplaints();
+    } catch (e) {
+      setComplaintMsg(e instanceof Error ? e.message : "Lỗi gửi khiếu nại");
+    } finally {
+      setComplaintBusy(false);
     }
   }
 
@@ -446,7 +503,13 @@ export default function AccountPage() {
                   <b className="text-brand-400">{formatVND(o.total)}</b>
                 </div>
                 <div className="mt-3 space-y-2">
-                  {o.items.map((item) => (
+                  {o.items.map((item) => {
+                    const inWarranty = item.status === "delivered" && isWithinWarranty(item.warranty_ends_at);
+                    const openComplaint =
+                      complaints.find(
+                        (c) => c.order_item_id === item.id && (c.status === "pending" || c.status === "processing"),
+                      ) ?? null;
+                    return (
                     <div key={item.id} className="vd-card-flat p-3 text-sm">
                       <div className="font-semibold">
                         {item.product_name} — {item.variant_name}
@@ -463,6 +526,68 @@ export default function AccountPage() {
                           {item.delivered_note && <p className="vd-muted">{item.delivered_note}</p>}
                         </div>
                       )}
+                      {/* Bảo hành gắn đơn (v4.8) — hạn tính từ ngày giao. */}
+                      {item.status === "delivered" && item.warranty_ends_at && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span
+                            className={`text-xs rounded-full px-2.5 py-1 font-semibold ${
+                              inWarranty ? "bg-emerald-500/15 text-emerald-300" : "vd-surface2 vd-muted"
+                            }`}
+                          >
+                            Bảo hành đến {formatDate(item.warranty_ends_at)} · {inWarranty ? "Còn bảo hành" : "Hết bảo hành"}
+                          </span>
+                          {hasRealSession && inWarranty && !openComplaint && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setComplaintItemId(complaintItemId === item.id ? null : item.id);
+                                setComplaintMsg("");
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
+                            >
+                              <MessageSquareWarning size={14} aria-hidden="true" /> Gửi khiếu nại
+                            </button>
+                          )}
+                          {openComplaint && (
+                            <span className="text-xs font-semibold text-amber-300">
+                              Đã có khiếu nại {COMPLAINT_STATUS_LABELS[openComplaint.status]} — xem tiến trình bên dưới.
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {complaintItemId === item.id && (
+                        <div className="mt-2 rounded-xl border vd-border p-3 space-y-2">
+                          <label className="block">
+                            <span className="field-label">Lý do khiếu nại</span>
+                            <select value={complaintReason} onChange={(e) => setComplaintReason(e.target.value as ComplaintReason)} className="field">
+                              {COMPLAINT_REASONS.map((r) => (
+                                <option key={r.value} value={r.value}>{r.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="field-label">Mô tả vấn đề *</span>
+                            <textarea
+                              value={complaintContent}
+                              onChange={(e) => setComplaintContent(e.target.value)}
+                              rows={3}
+                              placeholder="vd: Mã báo lỗi khi kích hoạt, đã thử lại 2 lần vẫn không được…"
+                              className="field"
+                            />
+                          </label>
+                          {complaintMsg && (
+                            <p role="alert" className="text-sm font-semibold text-red-400">{complaintMsg}</p>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => void submitComplaint(item.id)}
+                            disabled={complaintBusy}
+                            className="btn-primary !py-2 text-sm disabled:opacity-50"
+                          >
+                            {complaintBusy ? "Đang gửi…" : "Gửi khiếu nại"}
+                          </button>
+                        </div>
+                      )}
                       {item.status === "waiting_manual" && (
                         <p className="flex items-center gap-1.5 text-amber-300 mt-1">
                           <Clock size={14} aria-hidden="true" /> Đang chờ shop xử lý — sẽ gửi mail khi xong.
@@ -471,11 +596,81 @@ export default function AccountPage() {
                       {item.status === "failed" && <p className="text-red-400 mt-1">Hết mã trong kho — shop sẽ giao tay, liên hệ kèm mã đơn.</p>}
                       {item.status === "pending" && <p className="vd-muted mt-1">Chưa thanh toán.</p>}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
           </div>
+
+          {/* Khiếu nại của tôi (v4.8) — tiến trình xử lý theo từng khiếu nại. */}
+          {hasRealSession && (
+            <div className="mt-8">
+              <h2 className="font-bold flex items-center gap-2">
+                <MessageSquareWarning size={18} aria-hidden="true" className="text-amber-300" /> Khiếu nại của tôi
+              </h2>
+              {complaintsLoading ? (
+                <p className="text-sm vd-muted mt-2">Đang tải khiếu nại…</p>
+              ) : complaints.length === 0 ? (
+                <p className="text-sm vd-muted mt-2">Chưa có khiếu nại nào. Món còn trong hạn bảo hành sẽ có nút “Gửi khiếu nại” ở trên.</p>
+              ) : (
+                <div className="space-y-3 mt-3">
+                  {complaints.map((c) => {
+                    const steps: Complaint["status"][] = ["pending", "processing", "resolved"];
+                    const stepIdx = c.status === "rejected" ? -1 : steps.indexOf(c.status);
+                    return (
+                      <div key={c.id} className="vd-card p-4 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <b>{c.product_name ?? "Sản phẩm"} <span className="font-mono font-normal vd-muted">· {c.order_code}</span></b>
+                          <span
+                            className={`text-xs rounded-full px-2.5 py-1 font-semibold ${
+                              c.status === "resolved"
+                                ? "bg-emerald-500/15 text-emerald-300"
+                                : c.status === "rejected"
+                                  ? "bg-red-500/15 text-red-300"
+                                  : "bg-amber-500/15 text-amber-300"
+                            }`}
+                          >
+                            {COMPLAINT_STATUS_LABELS[c.status]}
+                          </span>
+                        </div>
+                        <p className="vd-muted mt-1">
+                          {COMPLAINT_REASON_LABELS[c.reason]} · gửi {formatDateTime(c.created_at)}
+                        </p>
+                        <p className="mt-2">{c.content}</p>
+                        {/* Tiến trình: Chờ xử lý → Đang xử lý → Đã giải quyết (hoặc Đã từ chối). */}
+                        <div className="mt-3 flex items-center gap-1.5" aria-label={`Tiến trình: ${COMPLAINT_STATUS_LABELS[c.status]}`}>
+                          {steps.map((s, i) => (
+                            <span key={s} className="flex items-center gap-1.5">
+                              <span
+                                className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                                  stepIdx >= i ? "bg-emerald-500 text-white" : "vd-surface2 vd-muted"
+                                }`}
+                              >
+                                {stepIdx >= i ? <Check size={13} aria-hidden="true" /> : i + 1}
+                              </span>
+                              <span className={`text-xs font-semibold ${stepIdx >= i ? "text-emerald-300" : "vd-muted"}`}>
+                                {COMPLAINT_STATUS_LABELS[s]}
+                              </span>
+                              {i < steps.length - 1 && <span className="w-5 h-px bg-white/20" aria-hidden="true" />}
+                            </span>
+                          ))}
+                          {c.status === "rejected" && (
+                            <span className="ml-2 text-xs font-semibold text-red-300">Đã từ chối</span>
+                          )}
+                        </div>
+                        {c.admin_reply && (
+                          <p className="mt-2 rounded-lg vd-surface2 p-3 text-sm">
+                            <b>Shop trả lời:</b> {c.admin_reply}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
     </div>
   );

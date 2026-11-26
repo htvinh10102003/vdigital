@@ -47,6 +47,26 @@ export function formatDateTime(iso: string): string {
   }
 }
 
+/** Ngày dạng dd/mm/yyyy (vd hạn bảo hành). */
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    return new Intl.DateTimeFormat("vi-VN", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+/** Còn trong hạn bảo hành không (v4.8): có hạn và chưa quá ngày đó. */
+export function isWithinWarranty(warrantyEndsAt: string | null | undefined): boolean {
+  if (!warrantyEndsAt) return false;
+  return new Date(warrantyEndsAt).getTime() >= Date.now();
+}
+
 export function slugify(input: string): string {
   return input
     .toLowerCase()

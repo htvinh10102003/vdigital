@@ -99,7 +99,7 @@ export default function AccountManagePage() {
               <User size={18} aria-hidden="true" className="text-brand-400" /> Thông tin tài khoản
             </h2>
             <div className="mt-4 flex items-center gap-3">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xl font-black text-white">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xl font-extrabold text-white">
                 {user.name.charAt(0).toUpperCase()}
               </span>
               <div className="min-w-0">
@@ -188,7 +188,7 @@ export default function AccountManagePage() {
               </li>
               <li className="flex items-center justify-between gap-2 rounded-lg vd-surface2 px-3 py-2.5">
                 <span className="flex items-center gap-2">
-                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] font-black text-slate-900">G</span>
+                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] font-extrabold text-slate-900">G</span>
                   Đăng nhập bằng Google
                 </span>
                 {hasGoogle ? (

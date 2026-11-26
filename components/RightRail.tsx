@@ -76,7 +76,7 @@ export function CartPanel() {
             )}
             <div className="flex items-center justify-between">
               <span className="text-sm vd-muted">Tổng cộng</span>
-              <span className="font-black text-brand-400">{formatVND(total)}</span>
+              <span className="font-extrabold text-brand-400">{formatVND(total)}</span>
             </div>
           </div>
           <Link href="/gio-hang" className="btn-primary w-full !py-2.5 text-sm">
@@ -119,7 +119,7 @@ export function FollowCard() {
   return (
     <div className="rounded-2xl bg-gradient-to-br from-brand-600 via-violet-600 to-indigo-600 p-5 text-white">
       <BellRing size={24} />
-      <p className="mt-2 font-black text-lg leading-snug">Theo dõi VDigital</p>
+      <p className="mt-2 font-extrabold text-lg leading-snug">Theo dõi VDigital</p>
       <p className="text-sm text-white/85 mt-1">Nhận tin khuyến mãi và sản phẩm mới nhất.</p>
       {done ? (
         <p className="mt-3 rounded-xl bg-white/15 px-3 py-2 text-sm font-semibold">Đã đăng ký! Kiểm tra email của bạn nhé.</p>

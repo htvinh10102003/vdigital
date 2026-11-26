@@ -22,6 +22,17 @@ function orderStatusAfter(order: Order): Order["status"] {
   return "paid";
 }
 
+/** Đóng dấu ngày giao + hạn bảo hành cho món vừa giao (v4.8).
+ * Hạn = ngày giao + số ngày bảo hành đã snapshot lúc mua (fallback: số ngày
+ * hiện tại của sản phẩm, rồi 30). */
+function stampDelivery(item: Order["items"][number], productWarrantyDays?: number | null): void {
+  const days = item.warranty_days ?? productWarrantyDays ?? 30;
+  item.warranty_days = days;
+  const now = new Date();
+  item.delivered_at = now.toISOString();
+  item.warranty_ends_at = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 export async function fulfillPaidOrder(order: Order): Promise<Order> {
   const emailLines: { label: string; value: string }[] = [];
   let guide = "";
@@ -44,6 +55,7 @@ export async function fulfillPaidOrder(order: Order): Promise<Order> {
         : stock?.code ?? "";
       if (delivered) {
         item.status = "delivered";
+        stampDelivery(item, found?.product.warranty_days);
         item.delivered_code = delivered;
         item.delivered_note = found?.variant.delivery_note ?? null;
         emailLines.push({ label: `${item.product_name} — ${item.variant_name}`, value: delivered });
@@ -55,6 +67,7 @@ export async function fulfillPaidOrder(order: Order): Promise<Order> {
       const stock = await takeStockCode(item.variant_id, order.id);
       if (stock) {
         item.status = "delivered";
+        stampDelivery(item, found?.product.warranty_days);
         item.delivered_code = stock.code;
         emailLines.push({ label: `${item.product_name} — ${item.variant_name}`, value: stock.code });
       } else {
@@ -125,10 +138,11 @@ export async function deliverGameCard(
   item.delivered_serial = input.serial.trim();
   item.delivered_pin = input.pin.trim();
   item.delivered_note = input.note?.trim() || null;
+  const found = findVariantInCatalog(await getCatalog(), item.variant_id) ?? findVariant(item.variant_id);
+  stampDelivery(item, found?.product.warranty_days);
   order.status = orderStatusAfter(order);
   await updateOrder(order);
 
-  const found = findVariantInCatalog(await getCatalog(), item.variant_id) ?? findVariant(item.variant_id);
   const mail = await buildDeliveryEmail(getSupabaseServer(), {
     type: "game_card",
     productId: item.product_id,
@@ -165,10 +179,11 @@ export async function completeManualItem(
 
   item.status = "delivered";
   item.delivered_note = note.trim() || "Đã nâng cấp / thêm vào Family xong.";
+  const found = findVariantInCatalog(await getCatalog(), item.variant_id) ?? findVariant(item.variant_id);
+  stampDelivery(item, found?.product.warranty_days);
   order.status = orderStatusAfter(order);
   await updateOrder(order);
 
-  const found = findVariantInCatalog(await getCatalog(), item.variant_id) ?? findVariant(item.variant_id);
   // Gửi kèm thông tin khách đã điền theo manual_fields (vd email cần add
   // Family) để khách đối chiếu lại — hiện nhãn thật của ô, không hiện id.
   const fieldLabel = new Map((found?.variant.manual_fields ?? []).map((f) => [f.id, f.label]));

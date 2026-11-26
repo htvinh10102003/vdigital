@@ -79,7 +79,7 @@ function AvatarMenu() {
         aria-expanded={open}
         className="flex min-h-11 items-center gap-2 rounded-full border vd-border py-1.5 pl-1.5 pr-3 hover:border-brand-500"
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-600 text-sm font-black text-white">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-600 text-sm font-extrabold text-white">
           {auth.user.name.charAt(0).toUpperCase()}
         </span>
         <span className="hidden text-sm font-semibold md:block">{auth.user.name}</span>
@@ -233,7 +233,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div className="mt-auto">
         <div className="rounded-2xl bg-gradient-to-br from-brand-600 via-violet-600 to-indigo-600 p-4 text-white">
           <Gift size={26} />
-          <p className="mt-2 font-black leading-snug">
+          <p className="mt-2 font-extrabold leading-snug">
             {maxDisc > 0 ? (
               <>
                 Ưu đãi đặc biệt

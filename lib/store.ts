@@ -226,6 +226,11 @@ export async function createOrder(input: {
       delivered_serial: null,
       delivered_pin: null,
       delivered_note: null,
+      // Bảo hành snapshot lúc mua (v4.8) — sau này admin đổi bảo hành của
+      // sản phẩm thì đơn cũ không bị đổi theo.
+      warranty_days: found.product.warranty_days ?? 30,
+      delivered_at: null,
+      warranty_ends_at: null,
       // Thông tin khách điền theo manual_fields của gói (gói làm tay) —
       // admin xem trong chi tiết đơn để xử lý tay.
       customer_info: it.customerInfo ?? null,
@@ -291,26 +296,31 @@ export async function createOrder(input: {
     if (ordErr) throw new Error(`Lưu đơn vào Supabase thất bại: ${ordErr.message}`);
     let savedItems = null as OrderItem[] | null;
     let itemErr = null as { message: string } | null;
+    const itemRows = (withWarranty: boolean) =>
+      items.map((i) => ({
+        order_id: ord.id,
+        product_id: i.product_id,
+        variant_id: i.variant_id,
+        product_name: i.product_name,
+        variant_name: i.variant_name,
+        price: i.price,
+        quantity: i.quantity,
+        fulfillment_type: i.fulfillment_type,
+        status: i.status,
+        customer_info: i.customer_info ?? {},
+        ...(withWarranty ? { warranty_days: i.warranty_days ?? 30 } : {}),
+      }));
     {
-      const res = await sb
-        .from("order_items")
-        .insert(
-          items.map((i) => ({
-            order_id: ord.id,
-            product_id: i.product_id,
-            variant_id: i.variant_id,
-            product_name: i.product_name,
-            variant_name: i.variant_name,
-            price: i.price,
-            quantity: i.quantity,
-            fulfillment_type: i.fulfillment_type,
-            status: i.status,
-            customer_info: i.customer_info ?? {},
-          })),
-        )
-        .select("*");
+      const res = await sb.from("order_items").insert(itemRows(true)).select("*");
       savedItems = res.data as OrderItem[] | null;
       itemErr = res.error;
+      // DB chưa chạy migration 011 (chưa có cột warranty_days) thì lưu lại
+      // không kèm bảo hành — đơn vẫn phải lưu được, không được hỏng.
+      if (itemErr && itemErr.message.includes("warranty_days")) {
+        const retry = await sb.from("order_items").insert(itemRows(false)).select("*");
+        savedItems = retry.data as OrderItem[] | null;
+        itemErr = retry.error;
+      }
       // DB chưa chạy migration 005 (chưa có cột customer_info) thì lưu lại
       // không kèm thông tin khách — đơn vẫn phải lưu được, không được hỏng.
       if (itemErr && itemErr.message.includes("customer_info")) {
@@ -394,16 +404,26 @@ export async function updateOrder(order: Order): Promise<void> {
       })
       .eq("id", order.id);
     for (const item of order.items) {
-      await sb
-        .from("order_items")
-        .update({
-          status: item.status,
-          delivered_code: item.delivered_code,
-          delivered_serial: item.delivered_serial,
-          delivered_pin: item.delivered_pin,
-          delivered_note: item.delivered_note,
-        })
-        .eq("id", item.id);
+      const itemUpdate = (withWarranty: boolean) => ({
+        status: item.status,
+        delivered_code: item.delivered_code,
+        delivered_serial: item.delivered_serial,
+        delivered_pin: item.delivered_pin,
+        delivered_note: item.delivered_note,
+        ...(withWarranty
+          ? {
+              warranty_days: item.warranty_days ?? null,
+              delivered_at: item.delivered_at ?? null,
+              warranty_ends_at: item.warranty_ends_at ?? null,
+            }
+          : {}),
+      });
+      const { error } = await sb.from("order_items").update(itemUpdate(true)).eq("id", item.id);
+      // DB chưa chạy migration 011 thì cập nhật lại không kèm cột bảo hành —
+      // trạng thái giao hàng vẫn phải lưu được.
+      if (error && /warranty|delivered_at/.test(error.message)) {
+        await sb.from("order_items").update(itemUpdate(false)).eq("id", item.id);
+      }
     }
     return;
   }

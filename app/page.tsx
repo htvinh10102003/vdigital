@@ -26,7 +26,7 @@ function Section({ title, href, icon, children }: { title: string; href: string;
   return (
     <section className="mt-10">
       <div className="flex items-end justify-between mb-4">
-        <h2 className="font-display flex items-center gap-2 text-xl md:text-2xl font-black tracking-tight">
+        <h2 className="font-display flex items-center gap-2 text-xl md:text-2xl font-extrabold tracking-tight">
           {icon}
           {title}
         </h2>
@@ -63,7 +63,7 @@ export default async function HomePage() {
             <span className="inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold tracking-widest">
               VDigital — TÀI KHOẢN SỐ GIÁ TỐT
             </span>
-            <h1 className="mt-4 text-3xl leading-[1.15] md:text-5xl md:leading-[1.1] font-black max-w-lg">
+            <h1 className="mt-4 text-3xl leading-[1.15] md:text-5xl md:leading-[1.1] font-extrabold max-w-lg">
               Nhanh chóng
               <br />
               An toàn — Tiện lợi
@@ -97,7 +97,7 @@ export default async function HomePage() {
                 aria-label={p.name}
                 className="flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-white/15 border border-white/25 backdrop-blur text-center transition hover:bg-white/25"
               >
-                <span className="px-1 text-[11px] md:text-xs font-black leading-tight">{p.initials}</span>
+                <span className="px-1 text-[11px] md:text-xs font-extrabold leading-tight">{p.initials}</span>
               </Link>
             ))}
           </div>
@@ -112,7 +112,7 @@ export default async function HomePage() {
       {/* Danh mục phổ biến — icon tròn, danh mục thật của VDigital */}
       <section className="mt-10">
         <div className="flex items-end justify-between mb-4">
-          <h2 className="font-display text-xl md:text-2xl font-black tracking-tight">Danh mục phổ biến</h2>
+          <h2 className="font-display text-xl md:text-2xl font-extrabold tracking-tight">Danh mục phổ biến</h2>
           <Link href="/san-pham" className="text-sm text-brand-400 font-semibold hover:underline">
             Xem tất cả →
           </Link>
@@ -195,7 +195,7 @@ export default async function HomePage() {
 
       {/* 3 bước mua hàng */}
       <section className="mt-12">
-        <h2 className="font-display text-xl md:text-2xl font-black tracking-tight mb-4">Mua hàng số chỉ trong 3 bước</h2>
+        <h2 className="font-display text-xl md:text-2xl font-extrabold tracking-tight mb-4">Mua hàng số chỉ trong 3 bước</h2>
         <div className="grid md:grid-cols-3 gap-4">
           {[
             { n: "01", t: "Chọn sản phẩm", d: "Kiểm tra giá, thời hạn và chính sách bảo hành trước khi mua." },
@@ -203,7 +203,7 @@ export default async function HomePage() {
             { n: "03", t: "Nhận tài khoản ngay", d: "Thông tin được gửi vào chi tiết đơn hàng và email của bạn." },
           ].map((s) => (
             <div key={s.n} className="vd-card p-5">
-              <div className="text-3xl font-black text-brand-400">{s.n}</div>
+              <div className="text-3xl font-extrabold text-brand-400">{s.n}</div>
               <h3 className="font-bold mt-2">{s.t}</h3>
               <p className="text-sm vd-muted mt-1">{s.d}</p>
             </div>
@@ -213,12 +213,12 @@ export default async function HomePage() {
 
       {/* FAQ */}
       <section className="mt-12">
-        <h2 className="font-display text-xl md:text-2xl font-black tracking-tight mb-4">Câu hỏi thường gặp</h2>
+        <h2 className="font-display text-xl md:text-2xl font-extrabold tracking-tight mb-4">Câu hỏi thường gặp</h2>
         <FaqAccordion faqs={catalog.faqs} />
       </section>
 
       <section className="mt-12">
-        <h2 className="font-display text-xl md:text-2xl font-black tracking-tight mb-4">Thanh toán an toàn & tiện lợi</h2>
+        <h2 className="font-display text-xl md:text-2xl font-extrabold tracking-tight mb-4">Thanh toán an toàn & tiện lợi</h2>
         <div className="flex flex-wrap gap-2">
           {["VietQR (PayOS)", "Chuyển khoản ngân hàng"].map((m) => (
             <span key={m} className="chip">

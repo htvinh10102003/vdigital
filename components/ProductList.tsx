@@ -104,7 +104,7 @@ export function ProductList({
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-black tracking-tight">{title}</h1>
+      <h1 className="font-display text-2xl font-extrabold tracking-tight">{title}</h1>
       {description && <p className="text-sm vd-muted mt-1">{description}</p>}
       <p className="text-sm vd-muted mt-2">{filtered.length} sản phẩm</p>
 

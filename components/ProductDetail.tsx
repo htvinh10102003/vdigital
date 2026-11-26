@@ -166,7 +166,7 @@ export function ProductDetail({ slug }: { slug: string }) {
                 )}
               </div>
               <div className="flex items-baseline gap-3 mt-1">
-                <span className="font-display text-3xl font-black text-brand-400">{formatVND(selected.price)}</span>
+                <span className="font-display text-3xl font-extrabold text-brand-400">{formatVND(selected.price)}</span>
                 {selected.original_price > selected.price && (
                   <>
                     <span className="vd-muted2 line-through">{formatVND(selected.original_price)}</span>
@@ -294,7 +294,7 @@ export function ProductDetail({ slug }: { slug: string }) {
               {/* Tổng hợp đánh giá THẬT từ bảng reviews. */}
               {shownReviewCount > 0 ? (
                 <div className="flex items-center gap-4">
-                  <span className="font-display text-4xl font-black">{ratingText}/5</span>
+                  <span className="font-display text-4xl font-extrabold">{ratingText}/5</span>
                   <div className="text-sm vd-muted">
                     {[5, 4, 3, 2, 1].map((s) => (
                       <div key={s} className="flex items-center gap-2">

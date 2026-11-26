@@ -147,7 +147,53 @@ export interface OrderItem {
   /** Thông tin khách đã điền theo manual_fields của gói (key = id của ô,
       value = nội dung khách nhập) — admin xem trong chi tiết đơn để xử lý tay. */
   customer_info?: Record<string, string> | null;
+  /** Bảo hành gắn với món (v4.8): số ngày snapshot lúc mua; ngày giao thật;
+      hạn bảo hành = ngày giao + số ngày. Đơn cũ đã giao trước v4.8 thì hạn
+      tính tạm từ ngày tạo đơn. */
+  warranty_days?: number | null;
+  delivered_at?: string | null;
+  warranty_ends_at?: string | null;
 }
+
+/** Khiếu nại bảo hành của khách (v4.8). */
+export type ComplaintReason = "code_error" | "account_locked" | "wrong_product" | "other";
+export type ComplaintStatus = "pending" | "processing" | "resolved" | "rejected";
+
+export interface Complaint {
+  id: string;
+  order_code: string;
+  order_item_id: string | null;
+  user_id: string | null;
+  customer_email: string;
+  product_name: string | null;
+  reason: ComplaintReason;
+  content: string;
+  status: ComplaintStatus;
+  admin_reply: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const COMPLAINT_REASONS: { value: ComplaintReason; label: string }[] = [
+  { value: "code_error", label: "Mã lỗi / không dùng được" },
+  { value: "account_locked", label: "Tài khoản bị khóa" },
+  { value: "wrong_product", label: "Giao sai sản phẩm" },
+  { value: "other", label: "Khác" },
+];
+
+export const COMPLAINT_REASON_LABELS: Record<ComplaintReason, string> = {
+  code_error: "Mã lỗi / không dùng được",
+  account_locked: "Tài khoản bị khóa",
+  wrong_product: "Giao sai sản phẩm",
+  other: "Khác",
+};
+
+export const COMPLAINT_STATUS_LABELS: Record<ComplaintStatus, string> = {
+  pending: "Chờ xử lý",
+  processing: "Đang xử lý",
+  resolved: "Đã giải quyết",
+  rejected: "Đã từ chối",
+};
 
 export interface Order {
   id: string;

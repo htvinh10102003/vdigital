@@ -1,21 +1,21 @@
 import type { Metadata } from "next";
-import { Be_Vietnam_Pro, Inter } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/AppShell";
 import { getCatalog } from "@/lib/store";
 
 /**
- * Typography v4 — chuyên nghiệp, hỗ trợ tốt tiếng Việt có dấu:
- * - Be Vietnam Pro (thiết kế riêng cho tiếng Việt): tiêu đề/UI, giá, nút.
- * - Inter: nội dung, mô tả, nhãn nhỏ.
- * Cả hai đều qua next/font/google với subset vietnamese.
+ * Typography — một họ phông duy nhất (Inter) cho cả tiêu đề lẫn nội dung.
+ * Be Vietnam Pro đã bỏ (26/11): dấu tiếng Việt của nó ở độ đậm lớn mảnh
+ * hơn hẳn nét chữ gốc (thấy rõ ở "Tiện lợi", "tháng", "TÀI KHOẢN BẢN
+ * QUYỀN") — Inter vẽ dấu đậm đều nét với chữ gốc ở mọi cỡ. Độ đậm tối
+ * đa 800, không dùng 900.
  */
-const inter = Inter({ subsets: ["vietnamese", "latin"], variable: "--font-inter" });
-const beVietnamPro = Be_Vietnam_Pro({
+const inter = Inter({
   subsets: ["vietnamese", "latin"],
-  weight: ["400", "500", "600", "700", "800", "900"],
-  variable: "--font-display",
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-inter",
 });
 
 export const metadata: Metadata = {
@@ -39,7 +39,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const catalog = await getCatalog();
   return (
     <html lang="vi" suppressHydrationWarning>
-      <body className={`${inter.variable} ${beVietnamPro.variable}`}>
+      <body className={inter.variable}>
         <Providers initialCatalog={catalog}>
           <AppShell>{children}</AppShell>
         </Providers>
