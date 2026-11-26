@@ -93,6 +93,20 @@ function newProduct(): Product {
   };
 }
 
+function newCategory(): Category {
+  const id = `c-${Date.now()}`;
+  return { id, slug: `danh-muc-${Date.now()}`, name: "Danh mục mới", parent_id: null, sort_order: 0, icon: null, image_url: null };
+}
+
+function newBanner(): Banner {
+  const id = `b-${Date.now()}`;
+  return { id, title: "Banner mới", subtitle: "", cta_text: "Mua ngay", cta_link: "/san-pham", gradient: "from-indigo-600 to-violet-600", image_url: null, is_active: true, sort_order: 0 };
+}
+
+function newFaq(): Faq {
+  return { id: `f-${Date.now()}`, question: "Câu hỏi mới", answer: "", sort_order: 0 };
+}
+
 interface StockRow {
   id: string;
   variant_id: string;
@@ -368,6 +382,46 @@ export default function AdminPage() {
       setMsg({ tone: "ok", text: `Đã lưu ${editProduct.name} (${data.mode}).` });
       setEditId(null);
       setEditProduct(null);
+    } catch {
+      setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  // Xoá hẳn sản phẩm / danh mục / banner / FAQ — hỏi xác nhận trước.
+  // Server chặn khi còn đơn hàng (sản phẩm) hoặc còn sản phẩm (danh mục);
+  // chặn thì hiện đúng lý do để ông xử lý, không xoá lén.
+  async function deleteItem(kind: "product" | "category" | "banner" | "faq", id: string, label: string) {
+    if (!confirm(`Xoá hẳn “${label}”? Không khôi phục được.`)) return;
+    setBusyKey(`del-${kind}:${id}`);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/delete", {
+        method: "POST",
+        headers: await adminHeaders(),
+        body: JSON.stringify({ kind, id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ tone: "err", text: data.error || "Xoá thất bại — bấm lại để thử." });
+        return;
+      }
+      if (data.mode === "demo") {
+        if (kind === "product") saveCatalogOverrides({ products: catalog.products.filter((p) => p.id !== id) });
+        if (kind === "category") saveCatalogOverrides({ categories: catalog.categories.filter((c) => c.id !== id) });
+        if (kind === "banner") saveCatalogOverrides({ banners: catalog.banners.filter((b) => b.id !== id) });
+        if (kind === "faq") saveCatalogOverrides({ faqs: catalog.faqs.filter((f) => f.id !== id) });
+      }
+      if (kind === "product" && editId === id) {
+        setEditId(null);
+        setEditProduct(null);
+      }
+      if (kind === "category") setEditCats((cats ?? []).filter((c) => c.id !== id));
+      if (kind === "banner") setEditBanners((banners ?? []).filter((b) => b.id !== id));
+      if (kind === "faq") setEditFaqs((faqs ?? []).filter((f) => f.id !== id));
+      await refresh();
+      setMsg({ tone: "ok", text: `Đã xoá “${label}”.` });
     } catch {
       setMsg({ tone: "err", text: "Lỗi mạng — bấm lại để thử." });
     } finally {
@@ -836,20 +890,33 @@ export default function AdminPage() {
               + Thêm sản phẩm mới
             </button>
             {catalog.products.map((p) => (
-              <button
+              <div
                 key={p.id}
                 onClick={() => {
                   setEditId(p.id);
                   setEditProduct(JSON.parse(JSON.stringify(p)));
                 }}
-                className={`block w-full text-left rounded-xl border px-3 py-2.5 text-sm ${editId === p.id ? "border-brand-500 bg-brand-500/10" : "vd-border vd-card-flat"}`}
+                className={`flex items-start justify-between gap-2 rounded-xl border px-3 py-2.5 text-sm cursor-pointer ${editId === p.id ? "border-brand-500 bg-brand-500/10" : "vd-border vd-card-flat"}`}
               >
-                <b>{p.name}</b>
-                <span className="block text-xs vd-muted">
-                  {p.variants.length} gói · đã bán {formatSold(p.sold_count)}
-                  {p.review_count > 0 ? ` · ★ ${p.rating} (${p.review_count})` : " · chưa có đánh giá"} · {p.is_active ? "đang bán" : "đã ẩn"}
+                <span className="min-w-0">
+                  <b>{p.name}</b>
+                  <span className="block text-xs vd-muted">
+                    {p.variants.length} gói · đã bán {formatSold(p.sold_count)}
+                    {p.review_count > 0 ? ` · ★ ${p.rating} (${p.review_count})` : " · chưa có đánh giá"} · {p.is_active ? "đang bán" : "đã ẩn"}
+                  </span>
                 </span>
-              </button>
+                <button
+                  type="button"
+                  title={`Xoá ${p.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void deleteItem("product", p.id, p.name);
+                  }}
+                  className="shrink-0 rounded-lg px-2 py-1 text-sm font-bold text-red-400 hover:bg-red-500/10"
+                >
+                  ✕
+                </button>
+              </div>
             ))}
           </div>
           <div>
@@ -995,6 +1062,12 @@ export default function AdminPage() {
                     {busyKey === "save-product" ? "Đang lưu…" : "Lưu sản phẩm"}
                   </ActionButton>
                   <button onClick={() => { setEditId(null); setEditProduct(null); }} className="btn-outline !py-2.5 text-sm">Huỷ</button>
+                  <button
+                    onClick={() => void deleteItem("product", editProduct.id, editProduct.name)}
+                    className="ml-auto text-sm text-red-400 hover:underline self-center"
+                  >
+                    Xoá sản phẩm
+                  </button>
                 </div>
               </div>
             )}
@@ -1460,7 +1533,7 @@ export default function AdminPage() {
             <p className="text-xs vd-muted mt-1">Icon: nhập tên icon Lucide (vd: KeyRound, Gamepad2) hoặc để trống. Ảnh: up ảnh đại diện cho danh mục.</p>
             <div className="space-y-3 mt-3">
               {cats.map((c, i) => (
-                <div key={c.id} className="vd-card-flat p-3 grid sm:grid-cols-4 gap-2">
+                <div key={c.id} className="vd-card-flat p-3 grid sm:grid-cols-[1fr_1fr_1fr_auto_auto] gap-2 items-center">
                   <input value={c.name} onChange={(e) => { const n = [...cats]; n[i] = { ...c, name: e.target.value, slug: slugify(e.target.value) }; setEditCats(n); }} className="field" aria-label="Tên danh mục" />
                   <input value={c.slug} onChange={(e) => { const n = [...cats]; n[i] = { ...c, slug: slugify(e.target.value) }; setEditCats(n); }} className="field" aria-label="Slug" />
                   <input value={c.icon ?? ""} onChange={(e) => { const n = [...cats]; n[i] = { ...c, icon: e.target.value || null }; setEditCats(n); }} className="field" placeholder="Icon (vd: Gamepad2)" aria-label="Icon" />
@@ -1468,9 +1541,24 @@ export default function AdminPage() {
                     <input type="checkbox" checked={!c.parent_id} disabled className="accent-violet-600" />
                     {c.parent_id ? "Danh mục con" : "Danh mục chính"}
                   </label>
+                  <button
+                    type="button"
+                    title={`Xoá danh mục ${c.name}`}
+                    onClick={() => void deleteItem("category", c.id, c.name)}
+                    className="rounded-lg px-2 py-1 text-sm font-bold text-red-400 hover:bg-red-500/10"
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => setEditCats([...cats, newCategory()])}
+              className="btn-outline !py-2 text-sm mt-3"
+            >
+              + Thêm danh mục
+            </button>
           </div>
           <div className="vd-card p-4">
             <h3 className="font-display font-bold">Banner trang chủ</h3>
@@ -1484,10 +1572,26 @@ export default function AdminPage() {
                     <input value={b.cta_text} onChange={(e) => { const n = [...banners]; n[i] = { ...b, cta_text: e.target.value }; setEditBanners(n); }} className="field" aria-label="Chữ nút" />
                   </div>
                   <ImageUpload kind="banners" label="Ảnh banner" ratio="aspect-[2/1]" value={b.image_url ?? null} onChange={(url) => { const n = [...banners]; n[i] = { ...b, image_url: url }; setEditBanners(n); }} />
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={b.is_active} onChange={(e) => { const n = [...banners]; n[i] = { ...b, is_active: e.target.checked }; setEditBanners(n); }} className="accent-violet-600" /> Đang hiển thị</label>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={b.is_active} onChange={(e) => { const n = [...banners]; n[i] = { ...b, is_active: e.target.checked }; setEditBanners(n); }} className="accent-violet-600" /> Đang hiển thị</label>
+                    <button
+                      type="button"
+                      onClick={() => void deleteItem("banner", b.id, b.title)}
+                      className="ml-auto text-sm text-red-400 hover:underline"
+                    >
+                      Xoá banner
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => setEditBanners([...banners, newBanner()])}
+              className="btn-outline !py-2 text-sm mt-3"
+            >
+              + Thêm banner
+            </button>
           </div>
           <div className="vd-card p-4">
             <h3 className="font-display font-bold">Câu hỏi thường gặp (FAQ)</h3>
@@ -1496,9 +1600,23 @@ export default function AdminPage() {
                 <div key={f.id} className="vd-card-flat p-3 space-y-2">
                   <input value={f.question} onChange={(e) => { const n = [...faqs]; n[i] = { ...f, question: e.target.value }; setEditFaqs(n); }} className="field" aria-label="Câu hỏi" />
                   <textarea rows={2} value={f.answer} onChange={(e) => { const n = [...faqs]; n[i] = { ...f, answer: e.target.value }; setEditFaqs(n); }} className="field" aria-label="Câu trả lời" />
+                  <button
+                    type="button"
+                    onClick={() => void deleteItem("faq", f.id, f.question)}
+                    className="text-sm text-red-400 hover:underline"
+                  >
+                    Xoá câu hỏi
+                  </button>
                 </div>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => setEditFaqs([...faqs, newFaq()])}
+              className="btn-outline !py-2 text-sm mt-3"
+            >
+              + Thêm câu hỏi
+            </button>
           </div>
           <ActionButton busy={busyKey === "save-content"} onClick={saveContent}>
             {busyKey === "save-content" ? "Đang lưu…" : "Lưu danh mục / banner / FAQ"}
