@@ -2,8 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
+/* VDigital — bản sắc riêng: nền tối hiện đại, sidebar trái, điểm nhấn tím.
+   Không dùng lại bố cục/header/hero/card của MaKHive. */
 :root {
   color-scheme: dark;
+  --bg: #0a0f1e;
+  --bg-soft: #0e1526;
+  --surface: #141d33;
+  --surface-2: #1a2542;
+  --border: #232f4d;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --muted-2: #64748b;
+}
+html.light {
+  color-scheme: light;
+  --bg: #f4f6fb;
+  --bg-soft: #eef1f7;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #64748b;
+  --muted-2: #94a3b8;
 }
 
 html {
@@ -11,32 +32,111 @@ html {
 }
 
 body {
-  @apply bg-navy-900 text-slate-100 antialiased;
-  font-family: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-inter), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  @apply antialiased;
 }
 
 ::selection {
-  background: #f97316;
+  background: #7c3aed;
   color: #fff;
 }
 
-/* Thanh cuộn mảnh, hợp theme tối */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #24365f;
+  background: #334155;
   border-radius: 8px;
 }
+html.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
 ::-webkit-scrollbar-track {
-  background: #0b1220;
+  background: transparent;
 }
 
-input, select, textarea {
-  @apply outline-none;
-}
-input:focus, select:focus, textarea:focus {
-  border-color: #f97316 !important;
-  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.35);
+@layer components {
+  .vd-bg {
+    background: var(--bg);
+  }
+  .vd-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1.25rem;
+    box-shadow: 0 1px 2px rgba(2, 6, 23, 0.4), 0 10px 28px rgba(2, 6, 23, 0.25);
+  }
+  .vd-card-flat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1.25rem;
+  }
+  .vd-surface2 {
+    background: var(--surface-2);
+  }
+  .vd-muted {
+    color: var(--muted);
+  }
+  .vd-muted2 {
+    color: var(--muted-2);
+  }
+  .vd-border {
+    border-color: var(--border);
+  }
+  .field {
+    @apply w-full rounded-xl px-3.5 py-2.5 text-sm outline-none transition;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .field::placeholder {
+    color: var(--muted-2);
+  }
+  .field:focus {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
+  }
+  .field-label {
+    @apply block text-sm font-semibold mb-1.5;
+    color: var(--text);
+  }
+  .field-hint {
+    @apply text-xs mt-1;
+    color: var(--muted);
+  }
+  .field-error {
+    @apply text-sm text-red-400 mt-1.5;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-3 font-bold text-white shadow-sm transition hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 disabled:opacity-40;
+  }
+  .btn-orange {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-accent-500 px-5 py-3 font-bold text-white shadow-sm transition hover:bg-accent-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60 disabled:opacity-40;
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 disabled:opacity-40;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .btn-outline:hover {
+    border-color: #8b5cf6;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .chip:hover {
+    border-color: #8b5cf6;
+  }
+  .pill {
+    @apply rounded-full border px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 disabled:opacity-40;
+  }
+  .tab-btn {
+    @apply px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 -mb-px transition;
+  }
 }

@@ -13,6 +13,28 @@ export default function AccountPage() {
   const [lookup, setLookup] = useState("");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
+  const [pw1, setPw1] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [pwMsg, setPwMsg] = useState("");
+
+  async function changePassword() {
+    setPwMsg("");
+    if (pw1.length < 8) {
+      setPwMsg("Mật khẩu mới cần ít nhất 8 ký tự.");
+      return;
+    }
+    if (pw1 !== pw2) {
+      setPwMsg("Hai mật khẩu không khớp.");
+      return;
+    }
+    const r = await auth.changePassword(pw1);
+    if (r.error) setPwMsg(`Đổi mật khẩu thất bại: ${r.error}`);
+    else {
+      setPwMsg("Đã đổi mật khẩu thành công.");
+      setPw1("");
+      setPw2("");
+    }
+  }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -76,12 +98,12 @@ export default function AccountPage() {
           Bạn chưa đăng nhập — vẫn xem được đơn bằng mã đơn bên dưới. Đăng nhập (nút Tài khoản ở header) để lưu lịch sử đơn theo tài khoản.
         </p>
       )}
-      <div className="flex gap-1 border-b border-navy-700 mt-4">
+      <div className="flex gap-1 border-b vd-border mt-4">
         {(["orders", "account"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px ${tab === t ? "border-brand-500 text-brand-400" : "border-transparent text-slate-400"}`}
+            className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px ${tab === t ? "border-brand-500 text-brand-400" : "border-transparent vd-muted"}`}
           >
             {t === "orders" ? "Đơn hàng của tôi" : "Quản lý tài khoản"}
           </button>
@@ -95,12 +117,26 @@ export default function AccountPage() {
               <p><b>Họ tên:</b> {auth.user.name}</p>
               <p><b>Email:</b> {auth.user.email}</p>
               {auth.user.isDemo && <p className="text-sm text-amber-300">Tài khoản demo (chưa cấu hình Supabase).</p>}
+              <div className="vd-card p-4 !max-w-none">
+                <h3 className="font-bold">Đổi mật khẩu</h3>
+                <p className="text-xs vd-muted mt-1">
+                  {auth.isAdmin
+                    ? "Mật khẩu tạm lần đầu rất yếu — đổi ngay sang mật khẩu mạnh (ít nhất 8 ký tự, có chữ + số) sau khi đăng nhập lần đầu."
+                    : "Đặt mật khẩu mới ít nhất 8 ký tự."}
+                </p>
+                <div className="mt-3 space-y-2">
+                  <input type="password" value={pw1} onChange={(e) => setPw1(e.target.value)} placeholder="Mật khẩu mới" className="field" autoComplete="new-password" />
+                  <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder="Nhập lại mật khẩu mới" className="field" autoComplete="new-password" />
+                  <button onClick={changePassword} className="btn-primary !py-2.5 text-sm">Đổi mật khẩu</button>
+                  {pwMsg && <p className="text-sm vd-muted">{pwMsg}</p>}
+                </div>
+              </div>
               <button onClick={() => auth.signOut()} className="rounded-lg border border-red-500/60 text-red-400 px-4 py-2 text-sm font-semibold">
                 Đăng xuất
               </button>
             </>
           ) : (
-            <p className="text-slate-400">Chưa đăng nhập. Bấm nút Tài khoản ở header để đăng nhập / đăng ký.</p>
+            <p className="vd-muted">Chưa đăng nhập. Bấm nút Tài khoản ở header để đăng nhập / đăng ký.</p>
           )}
         </div>
       )}
@@ -112,29 +148,29 @@ export default function AccountPage() {
               value={lookup}
               onChange={(e) => setLookup(e.target.value)}
               placeholder="Nhập mã đơn (vd VD261126-XXXX)"
-              className="flex-1 rounded-lg bg-navy-800 border border-navy-600 px-3 py-2 text-sm font-mono"
+              className="flex-1 rounded-lg vd-card-flat border vd-border px-3 py-2 text-sm font-mono"
             />
-            <button onClick={lookupOrder} className="rounded-lg bg-brand-500 hover:bg-brand-600 px-4 py-2 text-sm font-semibold text-white">
+            <button onClick={lookupOrder} className="rounded-lg bg-brand-600 hover:bg-brand-700 px-4 py-2 text-sm font-semibold text-white">
               Tra đơn
             </button>
           </div>
           {msg && <p className="text-sm text-red-400 mt-2">{msg}</p>}
-          {loading && <p className="text-slate-400 mt-4">Đang tải đơn…</p>}
+          {loading && <p className="vd-muted mt-4">Đang tải đơn…</p>}
           {orders.length === 0 && !loading && (
-            <p className="text-slate-400 mt-4">Chưa có đơn hàng nào. Mã đơn được lưu tự động sau khi bạn đặt hàng trên trình duyệt này.</p>
+            <p className="vd-muted mt-4">Chưa có đơn hàng nào. Mã đơn được lưu tự động sau khi bạn đặt hàng trên trình duyệt này.</p>
           )}
           <div className="space-y-4 mt-4">
             {orders.map((o) => (
-              <div key={o.id} className="rounded-2xl bg-navy-800 border border-navy-700 p-4">
+              <div key={o.id} className="vd-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <b className="font-mono">{o.code}</b>
-                  <span className="text-xs rounded-full bg-navy-700 px-2.5 py-1 font-semibold">{statusLabel[o.status] ?? o.status}</span>
-                  <span className="text-sm text-slate-400">{formatDateTime(o.created_at)}</span>
+                  <span className="text-xs rounded-full vd-surface2 px-2.5 py-1 font-semibold">{statusLabel[o.status] ?? o.status}</span>
+                  <span className="text-sm vd-muted">{formatDateTime(o.created_at)}</span>
                   <b className="text-brand-400">{formatVND(o.total)}</b>
                 </div>
                 <div className="mt-3 space-y-2">
                   {o.items.map((item) => (
-                    <div key={item.id} className="rounded-xl bg-navy-900 border border-navy-700 p-3 text-sm">
+                    <div key={item.id} className="vd-card-flat p-3 text-sm">
                       <div className="font-semibold">
                         {item.product_name} — {item.variant_name}
                       </div>
@@ -142,17 +178,17 @@ export default function AccountPage() {
                         <div className="mt-1 space-y-0.5">
                           {item.delivered_code && (
                             <p>
-                              Tài khoản / Mã: <code className="bg-navy-700 px-2 py-0.5 rounded font-mono break-all">{item.delivered_code}</code>
+                              Tài khoản / Mã: <code className="vd-surface2 px-2 py-0.5 rounded font-mono break-all">{item.delivered_code}</code>
                             </p>
                           )}
                           {item.delivered_serial && <p>Serial: <code className="font-mono">{item.delivered_serial}</code></p>}
-                          {item.delivered_pin && <p>Mã nạp: <code className="bg-navy-700 px-2 py-0.5 rounded font-mono">{item.delivered_pin}</code></p>}
-                          {item.delivered_note && <p className="text-slate-400">{item.delivered_note}</p>}
+                          {item.delivered_pin && <p>Mã nạp: <code className="vd-surface2 px-2 py-0.5 rounded font-mono">{item.delivered_pin}</code></p>}
+                          {item.delivered_note && <p className="vd-muted">{item.delivered_note}</p>}
                         </div>
                       )}
                       {item.status === "waiting_manual" && <p className="text-amber-300 mt-1">⏳ Đang chờ shop xử lý — sẽ gửi mail khi xong.</p>}
                       {item.status === "failed" && <p className="text-red-400 mt-1">Hết mã trong kho — shop sẽ giao tay, liên hệ kèm mã đơn.</p>}
-                      {item.status === "pending" && <p className="text-slate-400 mt-1">Chưa thanh toán.</p>}
+                      {item.status === "pending" && <p className="vd-muted mt-1">Chưa thanh toán.</p>}
                     </div>
                   ))}
                 </div>

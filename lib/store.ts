@@ -2,15 +2,15 @@ import fs from "fs/promises";
 import path from "path";
 import { DEMO_STOCK, SEED_CATALOG, findVariant } from "./seed";
 import { getSupabaseServer, isSupabaseConfigured } from "./supabase";
-import type { Catalog, Order, OrderItem, StockCode } from "./types";
+import type { Catalog, Order, OrderItem, Product, StockCode, Variant } from "./types";
 
 /**
  * Tầng dữ liệu.
  * - Đã cấu hình Supabase: đọc/ghi DB thật (bảng categories/products/variants/
  *   stock_codes/orders/order_items...). Đây là chế độ production.
  * - Chưa cấu hình: dùng dữ liệu seed trong lib/seed.ts và đơn hàng lưu trong
- *   bộ nhớ của server (chế độ demo — chạy thử luồng mua/giao ngay không cần DB).
- *   Đơn demo mất khi restart server; README hướng dẫn tạo Supabase để có dữ liệu thật.
+ *   bộ nhớ của server + file data/demo-orders.json (chế độ demo — chạy thử luồng
+ *   mua/giao ngay không cần DB). README hướng dẫn tạo Supabase để có dữ liệu thật.
  */
 
 // ---------------- Catalog ----------------
@@ -28,8 +28,20 @@ export async function getCatalog(): Promise<Catalog> {
     ]);
     if (cats.error || prods.error || vars.error) throw cats.error || prods.error || vars.error;
     const products = (prods.data ?? []).map((p: any) => ({
+      product_type: "account",
+      account_type: "shared",
+      image_url: null,
+      images: [],
       ...p,
-      variants: (vars.data ?? []).filter((v: any) => v.product_id === p.id),
+      variants: (vars.data ?? [])
+        .filter((v: any) => v.product_id === p.id)
+        .map((v: any) => ({
+          option_type: "duration",
+          option_label: null,
+          delivery_template: null,
+          delivery_note: null,
+          ...v,
+        })),
     }));
     return {
       categories: cats.data ?? SEED_CATALOG.categories,
@@ -43,19 +55,62 @@ export async function getCatalog(): Promise<Catalog> {
   }
 }
 
-// ---------------- Demo orders (in-memory, chỉ khi chưa có Supabase) ----------------
+export function findVariantInCatalog(
+  catalog: Catalog,
+  variantId: string,
+): { product: Product; variant: Variant } | null {
+  for (const p of catalog.products) {
+    const variant = p.variants.find((x) => x.id === variantId);
+    if (variant) return { product: p, variant };
+  }
+  return null;
+}
+
+// ---------------- Demo orders (chỉ khi chưa có Supabase) ----------------
+// Đơn demo lưu cả trong bộ nhớ lẫn file data/demo-orders.json — vì ở dev mode
+// mỗi API route có thể được bundle riêng (mỗi bundle một bản sao module),
+// đơn chỉ lưu trong Map của route tạo đơn sẽ không thấy ở route webhook.
+// File chung này khắc phục điều đó, và đơn demo cũng không mất khi restart.
+// (Production dùng Supabase, không dùng đường này.)
+const DEMO_ORDERS_FILE = path.join(process.cwd(), "data", "demo-orders.json");
 
 const demoOrders = new Map<string, Order>();
 const demoUsedStock = new Set<string>();
 
-export function getDemoOrder(code: string): Order | undefined {
-  return demoOrders.get(code);
+async function readDemoOrdersFile(): Promise<Order[]> {
+  try {
+    const raw = await fs.readFile(DEMO_ORDERS_FILE, "utf8");
+    return JSON.parse(raw) as Order[];
+  } catch {
+    return [];
+  }
 }
-export function listDemoOrders(): Order[] {
+
+async function writeDemoOrdersFile(): Promise<void> {
+  try {
+    await fs.mkdir(path.dirname(DEMO_ORDERS_FILE), { recursive: true });
+    await fs.writeFile(DEMO_ORDERS_FILE, JSON.stringify([...demoOrders.values()], null, 2), "utf8");
+  } catch {
+    /* bỏ qua khi chạy trên Vercel (filesystem chỉ đọc) */
+  }
+}
+
+export async function getDemoOrder(code: string): Promise<Order | undefined> {
+  const hit = demoOrders.get(code);
+  if (hit) return hit;
+  const all = await readDemoOrdersFile();
+  const found = all.find((o) => o.code === code);
+  if (found) demoOrders.set(found.code, found);
+  return found;
+}
+export async function listDemoOrders(): Promise<Order[]> {
+  const all = await readDemoOrdersFile();
+  for (const o of all) demoOrders.set(o.code, o);
   return [...demoOrders.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 export function saveDemoOrder(order: Order): void {
   demoOrders.set(order.code, order);
+  void writeDemoOrdersFile();
 }
 
 // ---------------- Stock codes ----------------
@@ -123,10 +178,11 @@ export async function createOrder(input: {
   user_id: string | null;
   items: { variantId: string; qty: number }[];
 }): Promise<Order> {
+  const catalog = await getCatalog();
   let total = 0;
   const items: OrderItem[] = [];
   for (const it of input.items) {
-    const found = findVariant(it.variantId);
+    const found = findVariantInCatalog(catalog, it.variantId) ?? findVariant(it.variantId);
     if (!found) throw new Error(`Không tìm thấy gói ${it.variantId}`);
     total += found.variant.price * it.qty;
     items.push({
@@ -216,7 +272,7 @@ export async function getOrderByCode(code: string): Promise<Order | null> {
     const { data: items } = await sb.from("order_items").select("*").eq("order_id", ord.id);
     return { ...ord, items: (items ?? []) as OrderItem[] };
   }
-  return getDemoOrder(code) ?? null;
+  return (await getDemoOrder(code)) ?? null;
 }
 
 export async function getOrderByPayosCode(payosCode: number): Promise<Order | null> {
@@ -227,7 +283,7 @@ export async function getOrderByPayosCode(payosCode: number): Promise<Order | nu
     const { data: items } = await sb.from("order_items").select("*").eq("order_id", ord.id);
     return { ...ord, items: (items ?? []) as OrderItem[] };
   }
-  for (const o of demoOrders.values()) if (o.payos_order_code === payosCode) return o;
+  for (const o of await listDemoOrders()) if (o.payos_order_code === payosCode) return o;
   return null;
 }
 

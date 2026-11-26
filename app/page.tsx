@@ -1,18 +1,32 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, CreditCard, Headset, ShieldCheck, Zap } from "lucide-react";
-import { useCatalog } from "@/components/providers";
+import { ArrowRight, Gamepad2, Grid2x2, KeyRound, Play, ShieldCheck, Sparkles, Wrench, Zap } from "lucide-react";
+import { getCatalog } from "@/lib/store";
+import { partitionHome } from "@/lib/catalog-utils";
 import { ProductCard } from "@/components/ProductCard";
-import { ProductImage } from "@/components/ProductImage";
+import { CartPanel, FollowCard, TrustCards } from "@/components/RightRail";
+import { FaqAccordion } from "@/components/FaqAccordion";
+
+/**
+ * Trang chủ — server component: sản phẩm đã có sẵn trong HTML đầu tiên.
+ * Bố cục theo ảnh mẫu Vinh gửi: hero trái + giỏ hàng phải, danh mục icon
+ * tròn, lưới sản phẩm nổi bật. Mỗi sản phẩm chỉ xuất hiện đúng 1 lần
+ * trên trang (partitionHome chia không trùng).
+ */
+
+const CAT_ICONS: Record<string, typeof KeyRound> = {
+  "tai-khoan-ban-quyen": KeyRound,
+  "the-game": Gamepad2,
+  ai: Sparkles,
+  "giai-tri": Play,
+  "vpn-tien-ich": ShieldCheck,
+};
 
 function Section({ title, href, children }: { title: string; href: string; children: React.ReactNode }) {
   return (
-    <section className="max-w-7xl mx-auto px-4 mt-10">
+    <section className="mt-10">
       <div className="flex items-end justify-between mb-4">
-        <h2 className="text-xl md:text-2xl font-bold">{title}</h2>
-        <Link href={href} className="text-sm text-brand-400 font-semibold hover:underline">
+        <h2 className="text-xl md:text-2xl font-black tracking-tight">{title}</h2>
+        <Link href={href} className="text-sm text-brand-400 font-semibold hover:underline shrink-0">
           Xem tất cả →
         </Link>
       </div>
@@ -21,110 +35,101 @@ function Section({ title, href, children }: { title: string; href: string; child
   );
 }
 
-export default function HomePage() {
-  const { catalog, loading } = useCatalog();
-  const [slide, setSlide] = useState(0);
-  const [faqOpen, setFaqOpen] = useState<number | null>(0);
-
+export default async function HomePage() {
+  const catalog = await getCatalog();
   const banners = catalog.banners.filter((b) => b.is_active);
-  useEffect(() => {
-    if (banners.length < 2) return;
-    const t = setInterval(() => setSlide((s) => (s + 1) % banners.length), 5000);
-    return () => clearInterval(t);
-  }, [banners.length]);
-
-  const products = useMemo(() => catalog.products.filter((p) => p.is_active), [catalog]);
-  const flashProducts = useMemo(
-    () => products.filter((p) => p.variants.some((v) => v.is_flash && v.flash_ends_at)),
-    [products],
-  );
-  const featured = useMemo(() => products.filter((p) => p.is_featured), [products]);
-  const newest = useMemo(() => products.filter((p) => p.is_new), [products]);
-  const best = useMemo(() => products.filter((p) => p.is_best_seller), [products]);
-
-  const banner = banners[slide] ?? banners[0];
+  const banner = banners[0];
+  const { flash, featured, best, newest, games, more } = partitionHome(catalog.products);
+  const topCats = catalog.categories.filter((c) => !c.parent_id);
+  const heroTiles = catalog.products.filter((p) => p.is_active).slice(0, 4);
 
   return (
     <div>
-      {/* Hero carousel + 2 ô quảng cáo */}
-      <div className="max-w-7xl mx-auto px-4 mt-4 grid lg:grid-cols-3 gap-4">
-        <div className={`lg:col-span-2 relative rounded-2xl overflow-hidden bg-gradient-to-br ${banner?.gradient ?? "from-navy-800 to-navy-900"} min-h-[280px] md:min-h-[320px] flex flex-col justify-center p-8`}>
-          {banner && (
-            <>
-              <span className="text-xs font-bold tracking-widest text-brand-400">VDIGITAL — TÀI KHOẢN SỐ GIÁ TỐT</span>
-              <h1 className="text-3xl md:text-4xl font-black mt-2 max-w-lg leading-tight">{banner.title}</h1>
-              <p className="text-slate-300 mt-2 max-w-md">{banner.subtitle}</p>
-              <div className="mt-5">
-                <Link href={banner.cta_link} className="inline-block rounded-lg bg-brand-500 hover:bg-brand-600 text-white font-semibold px-5 py-2.5">
-                  {banner.cta_text}
-                </Link>
-              </div>
-            </>
-          )}
-          {banners.length > 1 && (
-            <>
-              <button
-                onClick={() => setSlide((slide - 1 + banners.length) % banners.length)}
-                className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/40 p-2"
-                aria-label="Slide trước"
+      {/* Hero trái + giỏ hàng phải */}
+      <div className="grid gap-4 xl:grid-cols-[1fr_320px] items-start">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 min-h-[300px] md:min-h-[340px] p-7 md:p-10 text-white">
+          <div
+            className="absolute inset-0 opacity-25"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle at 85% 15%, rgba(255,255,255,0.5) 0, transparent 35%), radial-gradient(circle at 10% 90%, rgba(255,255,255,0.35) 0, transparent 30%)",
+            }}
+          />
+          <div className="relative">
+            <span className="inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold tracking-widest">
+              VDigital — TÀI KHOẢN SỐ GIÁ TỐT
+            </span>
+            <h1 className="mt-4 text-4xl md:text-5xl font-black leading-[1.1] max-w-lg">
+              Nhanh chóng
+              <br />
+              An toàn — Tiện lợi
+            </h1>
+            <p className="mt-3 max-w-md text-white/85">
+              {banner?.subtitle ??
+                "Tài khoản bản quyền, thẻ game và công cụ AI — thanh toán VietQR tự động, giao hàng tức thì, bảo hành uy tín."}
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link
+                href="/san-pham"
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-6 py-3 font-bold text-slate-900 hover:bg-amber-300"
               >
-                <ChevronLeft size={18} />
-              </button>
-              <button
-                onClick={() => setSlide((slide + 1) % banners.length)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/40 p-2"
-                aria-label="Slide sau"
+                Khám phá ngay <ArrowRight size={17} />
+              </Link>
+              <Link
+                href="/the-game"
+                className="inline-flex items-center gap-2 rounded-xl bg-white/15 border border-white/30 px-6 py-3 font-bold hover:bg-white/25"
               >
-                <ChevronRight size={18} />
-              </button>
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
-                {banners.map((b, i) => (
-                  <button
-                    key={b.id}
-                    onClick={() => setSlide(i)}
-                    aria-label={`Slide ${i + 1}`}
-                    className={`h-2 rounded-full transition-all ${i === slide ? "w-6 bg-brand-500" : "w-2 bg-white/40"}`}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <div className="grid grid-rows-2 gap-4">
-          <Link href="/the-game" className="rounded-2xl bg-gradient-to-br from-orange-600 to-red-700 p-5 flex flex-col justify-end min-h-[130px]">
-            <span className="font-bold text-lg">Thẻ game bản quyền</span>
-            <span className="text-sm text-white/80">Garena, Zing — đủ mệnh giá</span>
-          </Link>
-          <Link href="/vpn-tien-ich" className="rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-700 p-5 flex flex-col justify-end min-h-[130px]">
-            <span className="font-bold text-lg">Bảo mật & VPN</span>
-            <span className="text-sm text-white/80">NordVPN — ẩn IP, an toàn</span>
-          </Link>
-        </div>
-      </div>
-
-      {/* Phím tắt tìm nhanh */}
-      <div className="max-w-7xl mx-auto px-4 mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: "CapCut Pro", href: "/tai-khoan-ban-quyen/capcut-pro" },
-          { label: "Canva Pro", href: "/tai-khoan-ban-quyen/canva-pro" },
-          { label: "Google AI (Gemini)", href: "/tai-khoan-ban-quyen/google-ai-pro" },
-          { label: "Tất cả sản phẩm", href: "/san-pham" },
-        ].map((s) => (
-          <Link key={s.label} href={s.href} className="rounded-xl bg-navy-800 border border-navy-700 px-4 py-3 text-sm font-semibold text-center hover:border-brand-500">
-            {s.label}
-          </Link>
-        ))}
-      </div>
-
-      {loading && <p className="max-w-7xl mx-auto px-4 mt-8 text-slate-400">Đang tải sản phẩm…</p>}
-
-      {flashProducts.length > 0 && (
-        <Section title="⚡ Flash Sale hôm nay" href="/khuyen-mai">
-          <div className="mb-3 text-sm text-slate-400">
-            <span className="font-bold text-brand-400">ƯU ĐÃI GIỚI HẠN</span> — giá được cập nhật trực tiếp từ sản phẩm.
+                <Gamepad2 size={17} /> Thẻ game
+              </Link>
+            </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-            {flashProducts.map((p) => (
+          {/* Minh họa: các ô sản phẩm nổi — tự vẽ, không dùng ảnh/nhân vật của hãng khác */}
+          <div className="relative mt-8 flex gap-3">
+            {heroTiles.map((p) => (
+              <Link
+                key={p.id}
+                href={`/san-pham`}
+                className="flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-white/15 border border-white/25 backdrop-blur text-center"
+              >
+                <span className="px-1 text-[11px] md:text-xs font-black leading-tight">{p.initials}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-4">
+          <CartPanel />
+          <TrustCards />
+          <FollowCard />
+        </div>
+      </div>
+
+      {/* Danh mục phổ biến — icon tròn, danh mục thật của VDigital */}
+      <section className="mt-10">
+        <div className="flex items-end justify-between mb-4">
+          <h2 className="text-xl md:text-2xl font-black tracking-tight">Danh mục phổ biến</h2>
+          <Link href="/san-pham" className="text-sm text-brand-400 font-semibold hover:underline">
+            Xem tất cả →
+          </Link>
+        </div>
+        <div className="flex gap-4 md:gap-6 overflow-x-auto pb-2">
+          {topCats.map((c) => {
+            const Icon = CAT_ICONS[c.slug] ?? Grid2x2;
+            return (
+              <Link key={c.id} href={`/${c.slug}`} className="flex w-20 md:w-24 shrink-0 flex-col items-center gap-2 text-center group">
+                <span className="flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-full vd-card text-brand-400 transition group-hover:border-brand-500 group-hover:scale-105">
+                  <Icon size={30} />
+                </span>
+                <span className="text-xs md:text-sm font-semibold leading-tight">{c.name}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
+
+      {flash.length > 0 && (
+        <Section title="⚡ Flash Sale hôm nay" href="/khuyen-mai">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
+            {flash.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
           </div>
@@ -133,8 +138,29 @@ export default function HomePage() {
 
       {featured.length > 0 && (
         <Section title="Sản phẩm nổi bật" href="/san-pham">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
             {featured.map((p) => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {games.length > 0 && (
+        <Section title="Thẻ game" href="/the-game">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
+            {games.map((p) => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+          <p className="text-sm vd-muted mt-3">Mỗi loại thẻ là 1 sản phẩm — chọn mệnh giá 20K / 50K / 100K / 200K / 500K ở trang chi tiết.</p>
+        </Section>
+      )}
+
+      {best.length > 0 && (
+        <Section title="Bán chạy nhất" href="/ban-chay">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
+            {best.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
           </div>
@@ -143,7 +169,7 @@ export default function HomePage() {
 
       {newest.length > 0 && (
         <Section title="Sản phẩm mới" href="/san-pham?sort=newest">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
             {newest.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
@@ -151,10 +177,10 @@ export default function HomePage() {
         </Section>
       )}
 
-      {best.length > 0 && (
-        <Section title="Sản phẩm bán chạy nhất" href="/ban-chay">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-            {best.map((p) => (
+      {more.length > 0 && (
+        <Section title="Khám phá thêm" href="/san-pham">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
+            {more.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
           </div>
@@ -162,70 +188,43 @@ export default function HomePage() {
       )}
 
       {/* 3 bước mua hàng */}
-      <section className="max-w-7xl mx-auto px-4 mt-12">
-        <h2 className="text-xl md:text-2xl font-bold mb-4">Mua hàng số chỉ trong 3 bước</h2>
+      <section className="mt-12">
+        <h2 className="text-xl md:text-2xl font-black tracking-tight mb-4">Mua hàng số chỉ trong 3 bước</h2>
         <div className="grid md:grid-cols-3 gap-4">
           {[
             { n: "01", t: "Chọn sản phẩm", d: "Kiểm tra giá, thời hạn và chính sách bảo hành trước khi mua." },
             { n: "02", t: "Xác nhận & thanh toán", d: "Quét VietQR qua PayOS — hệ thống tự xác nhận trong vài giây." },
             { n: "03", t: "Nhận tài khoản ngay", d: "Thông tin được gửi vào chi tiết đơn hàng và email của bạn." },
           ].map((s) => (
-            <div key={s.n} className="rounded-2xl bg-navy-800 border border-navy-700 p-5">
-              <div className="text-3xl font-black text-brand-500">{s.n}</div>
+            <div key={s.n} className="vd-card p-5">
+              <div className="text-3xl font-black text-brand-400">{s.n}</div>
               <h3 className="font-bold mt-2">{s.t}</h3>
-              <p className="text-sm text-slate-400 mt-1">{s.d}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* 4 cam kết */}
-      <section className="max-w-7xl mx-auto px-4 mt-10">
-        <h2 className="text-xl md:text-2xl font-bold mb-4">Mua sản phẩm số an tâm cùng VDigital</h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { icon: ShieldCheck, t: "Sản phẩm chính hãng", d: "Tài khoản chuẩn, bảo hành đầy đủ." },
-            { icon: Zap, t: "Giao hàng tức thì", d: "Nhận tài khoản trong vài phút." },
-            { icon: CreditCard, t: "Thanh toán an toàn", d: "VietQR tự động, tiền về MB Bank." },
-            { icon: Headset, t: "Hỗ trợ 24/7", d: "Luôn có người hỗ trợ khi cần." },
-          ].map((c) => (
-            <div key={c.t} className="rounded-2xl bg-navy-800 border border-navy-700 p-5">
-              <c.icon className="text-brand-500" size={28} />
-              <h3 className="font-bold mt-3">{c.t}</h3>
-              <p className="text-sm text-slate-400 mt-1">{c.d}</p>
+              <p className="text-sm vd-muted mt-1">{s.d}</p>
             </div>
           ))}
         </div>
       </section>
 
       {/* FAQ */}
-      <section id="faq" className="max-w-7xl mx-auto px-4 mt-12">
-        <h2 className="text-xl md:text-2xl font-bold mb-4">Câu hỏi thường gặp</h2>
-        <div className="space-y-2">
-          {catalog.faqs.map((f, i) => (
-            <div key={f.id} className="rounded-xl bg-navy-800 border border-navy-700 overflow-hidden">
-              <button onClick={() => setFaqOpen(faqOpen === i ? null : i)} className="w-full text-left px-4 py-3 font-semibold flex justify-between gap-3">
-                {f.question}
-                <span className="text-brand-400">{faqOpen === i ? "−" : "+"}</span>
-              </button>
-              {faqOpen === i && <p className="px-4 pb-4 text-sm text-slate-300 leading-relaxed">{f.answer}</p>}
-            </div>
-          ))}
-        </div>
+      <section className="mt-12">
+        <h2 className="text-xl md:text-2xl font-black tracking-tight mb-4">Câu hỏi thường gặp</h2>
+        <FaqAccordion faqs={catalog.faqs} />
       </section>
 
-      {/* Phương thức thanh toán */}
-      <section className="max-w-7xl mx-auto px-4 mt-12">
-        <h2 className="text-xl md:text-2xl font-bold mb-4">Thanh toán an toàn & tiện lợi</h2>
+      <section className="mt-12">
+        <h2 className="text-xl md:text-2xl font-black tracking-tight mb-4">Thanh toán an toàn & tiện lợi</h2>
         <div className="flex flex-wrap gap-2">
           {["VietQR (PayOS)", "Chuyển khoản ngân hàng — MB Bank", "Thẻ ATM / Nội địa", "Thẻ quốc tế (Visa/Mastercard)", "Ví MoMo", "ZaloPay", "VNPay"].map((m) => (
-            <span key={m} className="rounded-full bg-navy-800 border border-navy-700 px-4 py-2 text-sm">
+            <span key={m} className="chip">
               {m}
             </span>
           ))}
         </div>
-        <p className="text-xs text-slate-500 mt-3">
+        <p className="text-xs vd-muted2 mt-3">
           VietQR qua PayOS là phương thức chính: miễn phí, 0% phí giao dịch, tiền về thẳng tài khoản MB Bank của shop và đơn được duyệt tự động.
+        </p>
+        <p className="text-xs vd-muted2 mt-2 flex items-center gap-1">
+          <Zap size={13} className="text-brand-400" /> Giao hàng tức thì · Thanh toán an toàn · Hỗ trợ 24/7 · Uy tín hàng đầu
         </p>
       </section>
     </div>

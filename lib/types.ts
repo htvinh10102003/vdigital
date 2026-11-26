@@ -1,4 +1,19 @@
-export type FulfillmentType = "auto" | "manual" | "game_card";
+export type FulfillmentType = "auto" | "manual" | "game_card" | "link";
+
+/** Loại tài khoản / sản phẩm — admin tự chọn trong /admin, không cần sửa code. */
+export type AccountType =
+  | "shared" // tài khoản dùng chung, giao tài khoản có sẵn
+  | "own_email" // nâng cấp trên email chính chủ của khách
+  | "add_family" // thêm vào Family bằng email khách
+  | "license_key" // key bản quyền / mã kích hoạt
+  | "activation_link" // link kích hoạt / link mời
+  | "game_card" // thẻ game (serial + mã nạp)
+  | "other";
+
+export type ProductType = "account" | "game_card" | "tool" | "other";
+
+/** Loại lựa chọn của gói: thời hạn, mệnh giá, gói token, số ghế, hoặc tự đặt tên. */
+export type OptionType = "duration" | "denomination" | "token_pack" | "seats" | "custom";
 
 export interface Category {
   id: string;
@@ -6,6 +21,8 @@ export interface Category {
   name: string;
   parent_id: string | null;
   sort_order: number;
+  icon?: string | null;
+  image_url?: string | null;
 }
 
 export interface Variant {
@@ -17,6 +34,13 @@ export interface Variant {
   price: number;
   original_price: number;
   fulfillment_type: FulfillmentType;
+  option_type: OptionType;
+  /** Nhãn nhóm lựa chọn hiển thị ở trang chi tiết, vd "Chọn mệnh giá" / "Chọn gói token". Để trống thì tự suy ra từ option_type. */
+  option_label: string | null;
+  /** Mẫu giao hàng cho loại link: nội dung/link giao cho khách, có thể chứa {code}. */
+  delivery_template: string | null;
+  /** Ghi chú giao hàng riêng cho gói này (hiện cho khách sau khi mua). */
+  delivery_note: string | null;
   is_flash: boolean;
   flash_ends_at: string | null;
   stock_count: number | null; // null = không giới hạn / không theo dõi kho
@@ -40,7 +64,13 @@ export interface Product {
   is_new: boolean;
   is_best_seller: boolean;
   is_active: boolean;
-  /** Màu nền gradient cho ảnh placeholder (không dùng logo của hãng). */
+  product_type: ProductType;
+  account_type: AccountType;
+  /** Ảnh bìa (URL Supabase Storage). Trống thì dùng ô màu + chữ viết tắt. */
+  image_url: string | null;
+  /** Ảnh phụ (mảng URL). */
+  images: string[];
+  /** Màu nền ô ảnh dự phòng (không dùng logo/ảnh của hãng khác). */
   gradient: string;
   initials: string;
   created_at: string;
@@ -106,6 +136,7 @@ export interface Banner {
   cta_text: string;
   cta_link: string;
   gradient: string;
+  image_url?: string | null;
   is_active: boolean;
   sort_order: number;
 }
@@ -129,3 +160,35 @@ export interface CartItem {
   productId: string;
   qty: number;
 }
+
+export const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
+  { value: "shared", label: "Tài khoản dùng chung (giao tài khoản có sẵn)" },
+  { value: "own_email", label: "Nâng cấp chính chủ (trên email khách)" },
+  { value: "add_family", label: "Thêm vào Family" },
+  { value: "license_key", label: "Key bản quyền / mã kích hoạt" },
+  { value: "activation_link", label: "Link kích hoạt / link mời" },
+  { value: "game_card", label: "Thẻ game (serial + mã nạp)" },
+  { value: "other", label: "Khác" },
+];
+
+export const PRODUCT_TYPES: { value: ProductType; label: string }[] = [
+  { value: "account", label: "Tài khoản bản quyền" },
+  { value: "game_card", label: "Thẻ game" },
+  { value: "tool", label: "Công cụ" },
+  { value: "other", label: "Khác" },
+];
+
+export const OPTION_TYPES: { value: OptionType; label: string }[] = [
+  { value: "duration", label: "Thời hạn (ngày / tháng / năm)" },
+  { value: "denomination", label: "Mệnh giá thẻ" },
+  { value: "token_pack", label: "Gói token" },
+  { value: "seats", label: "Số ghế / số thiết bị" },
+  { value: "custom", label: "Tự đặt tên (nhập nhãn riêng)" },
+];
+
+export const FULFILLMENT_TYPES: { value: FulfillmentType; label: string }[] = [
+  { value: "auto", label: "Tự động — lấy mã trong kho giao ngay" },
+  { value: "manual", label: "Làm tay — admin hoàn thành, đơn chờ xử lý" },
+  { value: "game_card", label: "Thẻ game — admin điền serial + mã, gửi mail" },
+  { value: "link", label: "Link / key — giao link hoặc key theo mẫu" },
+];

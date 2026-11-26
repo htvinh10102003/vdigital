@@ -5,6 +5,7 @@ import { useCatalog } from "@/components/providers";
 import { ProductCard } from "@/components/ProductCard";
 import { formatVND } from "@/lib/format";
 import type { Product } from "@/lib/types";
+import { maxDiscount, minPrice } from "@/lib/catalog-utils";
 
 export type SortKey = "newest" | "best" | "price-asc" | "price-desc" | "discount" | "rating";
 
@@ -18,17 +19,6 @@ export const SORTS: { key: SortKey; label: string }[] = [
 ];
 
 const PAGE_SIZE = 12;
-
-function minPrice(p: Product): number {
-  const vs = p.variants.filter((v) => v.is_active);
-  return vs.length ? Math.min(...vs.map((v) => v.price)) : 0;
-}
-function maxDiscount(p: Product): number {
-  return Math.max(
-    0,
-    ...p.variants.map((v) => (v.original_price > v.price ? 1 - v.price / v.original_price : 0)),
-  );
-}
 
 export function ProductList({
   title,
@@ -114,24 +104,24 @@ export function ProductList({
   const pageItems = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 mt-6">
-      <h1 className="text-2xl font-bold">{title}</h1>
-      {description && <p className="text-sm text-slate-400 mt-1">{description}</p>}
-      <p className="text-sm text-slate-400 mt-2">{filtered.length} sản phẩm</p>
+    <div>
+      <h1 className="text-2xl font-black tracking-tight">{title}</h1>
+      {description && <p className="text-sm vd-muted mt-1">{description}</p>}
+      <p className="text-sm vd-muted mt-2">{filtered.length} sản phẩm</p>
 
-      <div className="mt-4 grid lg:grid-cols-[240px_1fr] gap-6 items-start">
-        {/* Sidebar lọc */}
-        <aside className="rounded-2xl bg-navy-800 border border-navy-700 p-4 space-y-5 lg:sticky lg:top-32">
+      <div className="mt-5 grid lg:grid-cols-[240px_1fr] gap-6 items-start">
+        <aside className="vd-card p-4 space-y-5 lg:sticky lg:top-24">
           <div>
-            <h3 className="font-bold mb-2">Tìm kiếm</h3>
+            <label className="field-label" htmlFor="pl-search">Tìm kiếm</label>
             <input
+              id="pl-search"
               value={q}
               onChange={(e) => {
                 setQ(e.target.value);
                 setPage(1);
               }}
               placeholder="Tìm kiếm…"
-              className="w-full rounded-lg bg-navy-900 border border-navy-600 px-3 py-2 text-sm"
+              className="field"
             />
           </div>
           <div>
@@ -141,7 +131,7 @@ export function ProductList({
                 setCat("");
                 setPage(1);
               }}
-              className={`block w-full text-left px-2 py-1.5 rounded-lg text-sm ${cat === "" ? "bg-brand-500 text-white font-semibold" : "hover:bg-navy-700"}`}
+              className={`block w-full text-left px-2 py-1.5 rounded-lg text-sm ${cat === "" ? "bg-brand-600 text-white font-semibold" : "hover:bg-white/5"}`}
             >
               Tất cả ({catalog.products.length})
             </button>
@@ -152,7 +142,7 @@ export function ProductList({
                     setCat(c.slug);
                     setPage(1);
                   }}
-                  className={`block w-full text-left px-2 py-1.5 rounded-lg text-sm ${cat === c.slug ? "bg-brand-500 text-white font-semibold" : "hover:bg-navy-700"}`}
+                  className={`block w-full text-left px-2 py-1.5 rounded-lg text-sm ${cat === c.slug ? "bg-brand-600 text-white font-semibold" : "hover:bg-white/5"}`}
                 >
                   {c.name} ({countFor(c.id)})
                 </button>
@@ -165,7 +155,7 @@ export function ProductList({
                         setCat(s.slug);
                         setPage(1);
                       }}
-                      className={`block w-full text-left pl-6 pr-2 py-1.5 rounded-lg text-sm ${cat === s.slug ? "bg-brand-500 text-white font-semibold" : "hover:bg-navy-700"}`}
+                      className={`block w-full text-left pl-6 pr-2 py-1.5 rounded-lg text-sm ${cat === s.slug ? "bg-brand-600 text-white font-semibold" : "hover:bg-white/5"}`}
                     >
                       {s.name} ({countFor(s.id)})
                     </button>
@@ -176,7 +166,7 @@ export function ProductList({
           <div>
             <h3 className="font-bold mb-2">Tình trạng</h3>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} />
+              <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} className="accent-violet-600" />
               Chỉ hiện còn hàng
             </label>
           </div>
@@ -188,18 +178,18 @@ export function ProductList({
                 onChange={(e) => setMin(e.target.value.replace(/\D/g, ""))}
                 placeholder="Thấp nhất"
                 inputMode="numeric"
-                className="w-full rounded-lg bg-navy-900 border border-navy-600 px-2 py-2 text-sm"
+                className="field"
               />
               <input
                 value={max}
                 onChange={(e) => setMax(e.target.value.replace(/\D/g, ""))}
                 placeholder="Cao nhất"
                 inputMode="numeric"
-                className="w-full rounded-lg bg-navy-900 border border-navy-600 px-2 py-2 text-sm"
+                className="field"
               />
             </div>
             {(min || max) && (
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs vd-muted mt-1">
                 Từ {min ? formatVND(Number(min)) : "0đ"} đến {max ? formatVND(Number(max)) : "không giới hạn"}
               </p>
             )}
@@ -213,22 +203,21 @@ export function ProductList({
               setMax("");
               setPage(1);
             }}
-            className="w-full rounded-lg border border-navy-600 py-2 text-sm hover:border-brand-500"
+            className="btn-outline w-full !py-2 text-sm"
           >
             Đặt lại bộ lọc
           </button>
         </aside>
 
-        {/* Lưới sản phẩm */}
         <div>
           <div className="flex items-center justify-between gap-3 mb-4">
-            <span className="text-sm text-slate-400">
+            <span className="text-sm vd-muted">
               Trang {safePage}/{pages}
             </span>
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortKey)}
-              className="rounded-lg bg-navy-800 border border-navy-600 px-3 py-2 text-sm"
+              className="field !w-auto"
               aria-label="Sắp xếp"
             >
               {SORTS.map((s) => (
@@ -239,7 +228,7 @@ export function ProductList({
             </select>
           </div>
           {pageItems.length === 0 ? (
-            <p className="text-slate-400 py-10 text-center">Không tìm thấy sản phẩm nào phù hợp.</p>
+            <p className="vd-muted py-10 text-center">Không tìm thấy sản phẩm nào phù hợp.</p>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
               {pageItems.map((p) => (
@@ -253,7 +242,7 @@ export function ProductList({
                 <button
                   key={n}
                   onClick={() => setPage(n)}
-                  className={`w-9 h-9 rounded-lg text-sm font-semibold ${n === safePage ? "bg-brand-500 text-white" : "bg-navy-800 border border-navy-600"}`}
+                  className={`w-9 h-9 rounded-lg text-sm font-semibold ${n === safePage ? "bg-brand-600 text-white" : "vd-card-flat"}`}
                 >
                   {n}
                 </button>

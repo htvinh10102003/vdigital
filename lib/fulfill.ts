@@ -1,5 +1,6 @@
 import { deliveryEmailHtml, sendMail } from "./email";
 import { findVariant } from "./seed";
+import { findVariantInCatalog, getCatalog } from "./store";
 import { getOrderByCode, takeStockCode, updateOrder } from "./store";
 import type { Order } from "./types";
 
@@ -22,15 +23,32 @@ export async function fulfillPaidOrder(order: Order): Promise<Order> {
   const emailLines: { label: string; value: string }[] = [];
   let guide = "";
   let warranty = 30;
+  const catalog = await getCatalog();
 
   for (const item of order.items) {
     if (item.status !== "pending") continue;
-    const found = findVariant(item.variant_id);
+    const found = findVariantInCatalog(catalog, item.variant_id) ?? findVariant(item.variant_id);
     if (found) {
       guide = found.product.guide;
       warranty = found.product.warranty_days;
     }
-    if (item.fulfillment_type === "auto") {
+    if (item.fulfillment_type === "link") {
+      // Giao link/key theo mẫu admin đặt (có thể chứa {code}); không có mẫu thì lấy mã kho nếu có.
+      const template = found?.variant.delivery_template?.trim();
+      const stock = template ? null : await takeStockCode(item.variant_id, order.id);
+      const delivered = template
+        ? template.replaceAll("{code}", stock?.code ?? "")
+        : stock?.code ?? "";
+      if (delivered) {
+        item.status = "delivered";
+        item.delivered_code = delivered;
+        item.delivered_note = found?.variant.delivery_note ?? null;
+        emailLines.push({ label: `${item.product_name} — ${item.variant_name}`, value: delivered });
+      } else {
+        item.status = "failed";
+        item.delivered_note = "Chưa có link/key để giao — admin cần bổ sung mẫu giao hàng.";
+      }
+    } else if (item.fulfillment_type === "auto") {
       const stock = await takeStockCode(item.variant_id, order.id);
       if (stock) {
         item.status = "delivered";
@@ -88,7 +106,7 @@ export async function deliverGameCard(
   order.status = orderStatusAfter(order);
   await updateOrder(order);
 
-  const found = findVariant(item.variant_id);
+  const found = findVariantInCatalog(await getCatalog(), item.variant_id) ?? findVariant(item.variant_id);
   await sendMail({
     to: order.customer_email,
     subject: `[VDigital] Đơn ${order.code} — mã thẻ ${item.product_name} của bạn`,
@@ -126,7 +144,7 @@ export async function completeManualItem(
   order.status = orderStatusAfter(order);
   await updateOrder(order);
 
-  const found = findVariant(item.variant_id);
+  const found = findVariantInCatalog(await getCatalog(), item.variant_id) ?? findVariant(item.variant_id);
   await sendMail({
     to: order.customer_email,
     subject: `[VDigital] Đơn ${order.code} — ${item.product_name} đã hoàn thành`,

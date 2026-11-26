@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { SEED_CATALOG } from "@/lib/seed";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { DEFAULT_ADMIN_EMAIL, getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { CartItem, Catalog, Product } from "@/lib/types";
 
 // ---------------- Catalog ----------------
@@ -15,24 +15,34 @@ interface CatalogCtx {
 
 const CatalogContext = createContext<CatalogCtx>({ catalog: SEED_CATALOG, loading: false, refresh: async () => {} });
 
-const OVERRIDE_KEY = "vdigital-overrides-v1";
+const OVERRIDE_KEY = "vdigital-overrides-v2";
 
 function applyOverrides(base: Catalog): Catalog {
   try {
     const raw = localStorage.getItem(OVERRIDE_KEY);
     if (!raw) return base;
-    const o = JSON.parse(raw) as { products?: Product[] };
-    if (!o.products?.length) return base;
-    const map = new Map(o.products.map((p) => [p.id, p]));
-    return { ...base, products: base.products.map((p) => map.get(p.id) ?? p) };
+    const o = JSON.parse(raw) as Partial<Catalog>;
+    return {
+      ...base,
+      categories: o.categories?.length ? o.categories : base.categories,
+      products: o.products?.length
+        ? base.products.map((p) => o.products!.find((x) => x.id === p.id) ?? p).concat(
+            o.products!.filter((x) => !base.products.some((p) => p.id === x.id)),
+          )
+        : base.products,
+      banners: o.banners?.length ? o.banners : base.banners,
+      faqs: o.faqs?.length ? o.faqs : base.faqs,
+    };
   } catch {
     return base;
   }
 }
 
-export function saveCatalogOverrides(products: Product[]) {
+export function saveCatalogOverrides(catalog: Partial<Catalog>) {
   try {
-    localStorage.setItem(OVERRIDE_KEY, JSON.stringify({ products }));
+    const raw = localStorage.getItem(OVERRIDE_KEY);
+    const prev = raw ? JSON.parse(raw) : {};
+    localStorage.setItem(OVERRIDE_KEY, JSON.stringify({ ...prev, ...catalog }));
   } catch {
     /* ignore */
   }
@@ -59,6 +69,7 @@ interface AuthCtx {
   signInGoogle: () => Promise<void>;
   demoSignIn: (email: string) => void;
   signOut: () => Promise<void>;
+  changePassword: (newPassword: string) => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthCtx>({
@@ -70,16 +81,19 @@ const AuthContext = createContext<AuthCtx>({
   signInGoogle: async () => {},
   demoSignIn: () => {},
   signOut: async () => {},
+  changePassword: async () => ({ error: "Chưa cấu hình" }),
 });
 
 export function useAuth() {
   return useContext(AuthContext);
 }
 
+// Email admin mặc định của VDigital khi env chưa đặt.
 const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
   .split(",")
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
+if (ADMIN_EMAILS.length === 0) ADMIN_EMAILS.push(DEFAULT_ADMIN_EMAIL);
 
 // ---------------- Cart ----------------
 
@@ -108,11 +122,37 @@ export function useCart() {
 const CART_KEY = "vdigital-cart-v1";
 const USER_KEY = "vdigital-demo-user-v1";
 
+// ---------------- Theme (sáng/tối) ----------------
+
+export function useTheme(): { light: boolean; toggle: () => void } {
+  const [light, setLight] = useState(false);
+  useEffect(() => {
+    try {
+      setLight(localStorage.getItem("vdigital-theme") === "light");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", light);
+    try {
+      localStorage.setItem("vdigital-theme", light ? "light" : "dark");
+    } catch {
+      /* ignore */
+    }
+  }, [light]);
+  return { light, toggle: () => setLight((v) => !v) };
+}
+
 // ---------------- Providers ----------------
 
-export function Providers({ children }: { children: ReactNode }) {
-  const [catalog, setCatalog] = useState<Catalog>(SEED_CATALOG);
-  const [catalogLoading, setCatalogLoading] = useState(true);
+export function Providers({ children, initialCatalog }: { children: ReactNode; initialCatalog?: Catalog }) {
+  // Catalog đã render phía server (layout fetch getCatalog) nên trang mở ra
+  // là thấy sản phẩm ngay, không còn "Đang tải sản phẩm…" 10–15s.
+  const [catalog, setCatalog] = useState<Catalog>(() =>
+    initialCatalog ? applyOverrides(initialCatalog) : SEED_CATALOG,
+  );
+  const [catalogLoading, setCatalogLoading] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -132,17 +172,12 @@ export function Providers({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    refreshCatalog();
-  }, [refreshCatalog]);
-
-  useEffect(() => {
     try {
       const raw = localStorage.getItem(CART_KEY);
       if (raw) setCartItems(JSON.parse(raw));
     } catch {
       /* ignore */
     }
-    // Auth: Supabase thật nếu đã cấu hình, còn không thì demo user lưu local.
     const sb = getSupabase();
     if (sb) {
       sb.auth.getSession().then(({ data }) => {
@@ -218,6 +253,12 @@ export function Providers({ children }: { children: ReactNode }) {
         } catch {
           /* ignore */
         }
+      },
+      changePassword: async (newPassword) => {
+        const sb = getSupabase();
+        if (!sb) return { error: "Chưa cấu hình Supabase." };
+        const { error } = await sb.auth.updateUser({ password: newPassword });
+        return error ? { error: error.message } : {};
       },
     };
   }, [user, authLoading]);

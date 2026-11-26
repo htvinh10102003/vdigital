@@ -1,9 +1,10 @@
 import { notFound } from "next/navigation";
 import { ProductDetail } from "@/components/ProductDetail";
-import { SEED_CATALOG } from "@/lib/seed";
+import { getCatalog } from "@/lib/store";
 
-export default function ProductPage({ params }: { params: { category: string; slug: string } }) {
-  const product = SEED_CATALOG.products.find((p) => p.slug === params.slug);
+export default async function ProductPage({ params }: { params: { category: string; slug: string } }) {
+  const catalog = await getCatalog();
+  const product = catalog.products.find((p) => p.slug === params.slug);
   if (!product) notFound();
   return <ProductDetail slug={product.slug} />;
 }

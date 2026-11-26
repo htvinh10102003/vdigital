@@ -8,6 +8,7 @@ import { discountPct, formatVND } from "@/lib/format";
 import { useAuth, useCart, useCatalog } from "@/components/providers";
 import { Countdown } from "@/components/Countdown";
 import { ProductCard, categoryPath } from "@/components/ProductCard";
+import { activeVariants, optionGroupLabel } from "@/lib/catalog-utils";
 import { ProductImage } from "@/components/ProductImage";
 
 interface Review {
@@ -36,10 +37,7 @@ export function ProductDetail({ slug }: { slug: string }) {
   const auth = useAuth();
   const router = useRouter();
   const product = catalog.products.find((p) => p.slug === slug);
-  const variants = useMemo(
-    () => (product ? [...product.variants].filter((v) => v.is_active).sort((a, b) => a.sort_order - b.sort_order) : []),
-    [product],
-  );
+  const variants = useMemo(() => (product ? activeVariants(product) : []), [product]);
   const [variantId, setVariantId] = useState<string | null>(null);
   const [tab, setTab] = useState<"desc" | "guide" | "reviews">("desc");
   const [myReviews, setMyReviews] = useState<Review[]>(() => (product ? loadReviews(product.id) : []));
@@ -54,7 +52,7 @@ export function ProductDetail({ slug }: { slug: string }) {
     : [];
 
   if (!product) {
-    return <p className="max-w-7xl mx-auto px-4 mt-10 text-slate-400">Đang tải sản phẩm…</p>;
+    return <p className="max-w-7xl mx-auto px-4 mt-10 vd-muted">Đang tải sản phẩm…</p>;
   }
 
   const cat = catalog.categories.find((c) => c.id === product.category_id);
@@ -90,12 +88,12 @@ export function ProductDetail({ slug }: { slug: string }) {
   return (
     <div className="max-w-7xl mx-auto px-4 mt-6">
       {/* Breadcrumb */}
-      <nav className="text-sm text-slate-400">
+      <nav className="text-sm vd-muted">
         <Link href="/" className="hover:text-white">Trang chủ</Link>
         {" › "}
         <Link href="/san-pham" className="hover:text-white">{cat?.name ?? "Sản phẩm"}</Link>
         {" › "}
-        <span className="text-slate-200">{product.name}</span>
+        <span className="">{product.name}</span>
       </nav>
 
       <div className="mt-4 grid lg:grid-cols-2 gap-8">
@@ -109,9 +107,9 @@ export function ProductDetail({ slug }: { slug: string }) {
               { t: "Phản hồi nhanh", d: "Hỗ trợ khi cần" },
               { t: "Thanh toán an toàn", d: "Xác nhận tự động" },
             ].map((c) => (
-              <div key={c.t} className="rounded-xl bg-navy-800 border border-navy-700 p-3 text-center">
+              <div key={c.t} className="vd-card-flat p-3 text-center">
                 <div className="text-sm font-semibold">{c.t}</div>
-                <div className="text-xs text-slate-400 mt-0.5">{c.d}</div>
+                <div className="text-xs vd-muted mt-0.5">{c.d}</div>
               </div>
             ))}
           </div>
@@ -121,7 +119,7 @@ export function ProductDetail({ slug }: { slug: string }) {
         <div>
           <span className="text-xs font-bold tracking-widest text-brand-400 uppercase">{cat?.name}</span>
           <h1 className="text-2xl md:text-3xl font-bold mt-1">{product.name}</h1>
-          <div className="flex items-center gap-2 text-sm text-slate-400 mt-2">
+          <div className="flex items-center gap-2 text-sm vd-muted mt-2">
             <span className="inline-flex items-center gap-1 text-amber-400 font-semibold">
               <Star size={15} fill="currentColor" /> {product.rating}
             </span>
@@ -131,9 +129,9 @@ export function ProductDetail({ slug }: { slug: string }) {
           </div>
 
           {selected && (
-            <div className="mt-4 rounded-2xl bg-navy-800 border border-navy-700 p-4">
+            <div className="mt-4 vd-card p-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Giá bán · {selected.label}</span>
+                <span className="text-sm vd-muted">Giá bán · {selected.label}</span>
                 {selected.is_flash && selected.flash_ends_at && (
                   <span className="inline-flex items-center gap-1 rounded-md bg-brand-500/15 text-brand-400 text-xs font-bold px-2 py-1">
                     <Zap size={13} /> Flash Sale — Kết thúc sau <Countdown endsAt={selected.flash_ends_at} />
@@ -144,7 +142,7 @@ export function ProductDetail({ slug }: { slug: string }) {
                 <span className="text-3xl font-black text-brand-400">{formatVND(selected.price)}</span>
                 {selected.original_price > selected.price && (
                   <>
-                    <span className="text-slate-500 line-through">{formatVND(selected.original_price)}</span>
+                    <span className="vd-muted2 line-through">{formatVND(selected.original_price)}</span>
                     <span className="rounded-md bg-red-600 text-white text-xs font-bold px-2 py-0.5">-{pct}%</span>
                   </>
                 )}
@@ -155,9 +153,9 @@ export function ProductDetail({ slug }: { slug: string }) {
             </div>
           )}
 
-          {/* Chọn gói */}
-          <h3 className="font-bold mt-5 mb-2">Chọn gói</h3>
-          <div className="grid grid-cols-2 gap-2">
+          {/* Chọn gói — pill selector: mệnh giá / thời hạn / gói token */}
+          <h3 className="font-bold mt-5 mb-2">{optionGroupLabel(selected)}</h3>
+          <div className="flex flex-wrap gap-2" role="group" aria-label={optionGroupLabel(selected)}>
             {variants.map((v) => {
               const out = v.stock_count === 0;
               const active = selected?.id === v.id;
@@ -166,31 +164,27 @@ export function ProductDetail({ slug }: { slug: string }) {
                   key={v.id}
                   disabled={out}
                   onClick={() => setVariantId(v.id)}
-                  className={`rounded-xl border p-3 text-left transition disabled:opacity-40 ${
-                    active ? "border-brand-500 bg-brand-500/10" : "border-navy-600 bg-navy-800 hover:border-slate-400"
-                  }`}
+                  className={`pill inline-flex items-center gap-2 ${active ? "!border-brand-500 !bg-brand-600 text-white" : "vd-border vd-card-flat hover:!border-brand-500"}`}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-sm">{v.label}</span>
-                    {v.is_flash && <span className="text-[10px] font-bold bg-brand-500 text-white rounded px-1.5 py-0.5">FLASH</span>}
-                  </div>
-                  <div className="text-brand-400 font-bold mt-0.5">{formatVND(v.price)}</div>
-                  {v.original_price > v.price && (
-                    <div className="text-xs text-slate-500 line-through">{formatVND(v.original_price)}</div>
-                  )}
-                  {out && <div className="text-xs text-red-400 font-semibold mt-0.5">Hết hàng</div>}
+                  <span className="font-semibold">{v.label}</span>
+                  <span className={active ? "text-white/90" : "text-brand-400"}>{formatVND(v.price)}</span>
+                  {v.is_flash && <span className="text-[10px] font-bold bg-amber-400 text-slate-900 rounded-full px-1.5 py-0.5">FLASH</span>}
+                  {out && <span className="text-xs text-red-400 font-semibold">Hết hàng</span>}
                 </button>
               );
             })}
           </div>
           {selected && (
-            <p className="text-xs text-slate-400 mt-2">
+            <p className="text-xs vd-muted mt-2">
               Hình thức giao:{" "}
               {selected.fulfillment_type === "auto"
                 ? "giao tự động ngay sau khi thanh toán."
                 : selected.fulfillment_type === "game_card"
-                  ? "admin gửi mã thẻ qua email sau khi thanh toán."
-                  : "làm tay — đơn chuyển sang Chờ xử lý, admin hoàn thành trong 5–30 phút."}
+                  ? "admin gửi serial + mã thẻ qua email sau khi thanh toán."
+                  : selected.fulfillment_type === "link"
+                    ? "giao link/key ngay sau khi thanh toán (theo mẫu admin đặt)."
+                    : "làm tay — đơn chuyển sang Chờ xử lý, admin hoàn thành trong 5–30 phút."}
+              {selected.delivery_note ? ` ${selected.delivery_note}` : ""}
             </p>
           )}
 
@@ -202,14 +196,14 @@ export function ProductDetail({ slug }: { slug: string }) {
                 cart.add(selected.id, product.id);
                 router.push("/thanh-toan");
               }}
-              className="flex-1 rounded-xl bg-brand-500 hover:bg-brand-600 py-3 font-bold text-white disabled:opacity-40"
+              className="flex-1 btn-primary disabled:opacity-40"
             >
               Mua ngay
             </button>
             <button
               disabled={!selected || !inStock}
               onClick={() => selected && cart.add(selected.id, product.id)}
-              className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-navy-700 hover:bg-navy-600 border border-navy-600 py-3 font-bold disabled:opacity-40"
+              className="flex-1 btn-outline disabled:opacity-40"
             >
               <ShoppingCart size={18} /> Thêm vào giỏ hàng
             </button>
@@ -219,7 +213,7 @@ export function ProductDetail({ slug }: { slug: string }) {
 
       {/* Tabs */}
       <div className="mt-10">
-        <div className="flex gap-1 border-b border-navy-700">
+        <div className="flex gap-1 border-b vd-border">
           {(
             [
               { key: "desc", label: "Mô tả sản phẩm" },
@@ -230,7 +224,7 @@ export function ProductDetail({ slug }: { slug: string }) {
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px ${tab === t.key ? "border-brand-500 text-brand-400" : "border-transparent text-slate-400 hover:text-white"}`}
+              className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px ${tab === t.key ? "border-brand-500 text-brand-400" : "border-transparent vd-muted hover:text-white"}`}
             >
               {t.label}
             </button>
@@ -238,24 +232,24 @@ export function ProductDetail({ slug }: { slug: string }) {
         </div>
         <div className="py-5 max-w-3xl">
           {tab === "desc" && (
-            <div className="space-y-3 text-slate-300 leading-relaxed">
+            <div className="space-y-3  leading-relaxed">
               <p>{product.description}</p>
               <p>
                 <b className="text-white">Vì sao nên chọn VDigital?</b> Giao hàng nhanh, bảo hành {product.warranty_days} ngày
                 1 đổi 1 nếu lỗi do shop, thanh toán VietQR tự động qua PayOS (0% phí), hỗ trợ 24/7.
               </p>
-              <p className="text-sm text-slate-400">
+              <p className="text-sm vd-muted">
                 Lưu ý: không chia sẻ tài khoản cho người khác khi shop chưa cho phép; đổi mật khẩu tài khoản giao ngay khi
                 nhận được nếu sản phẩm cho phép.
               </p>
             </div>
           )}
-          {tab === "guide" && <p className="whitespace-pre-line text-slate-300 leading-relaxed">{product.guide}</p>}
+          {tab === "guide" && <p className="whitespace-pre-line  leading-relaxed">{product.guide}</p>}
           {tab === "reviews" && (
             <div>
               <div className="flex items-center gap-4">
                 <span className="text-4xl font-black">{product.rating}/5</span>
-                <div className="text-sm text-slate-400">
+                <div className="text-sm vd-muted">
                   <div>5★ — {five} đánh giá</div>
                   <div>4★ — {four} đánh giá</div>
                   <div>3★ trở xuống — {Math.max(0, product.review_count - five - four)} đánh giá</div>
@@ -274,25 +268,25 @@ export function ProductDetail({ slug }: { slug: string }) {
                   onChange={(e) => setReviewText(e.target.value)}
                   placeholder={auth.user ? "Viết đánh giá của bạn…" : "Đăng nhập để viết đánh giá"}
                   rows={3}
-                  className="w-full rounded-lg bg-navy-800 border border-navy-600 px-3 py-2 text-sm"
+                  className="field"
                 />
-                <button className="rounded-lg bg-brand-500 hover:bg-brand-600 px-4 py-2 text-sm font-semibold text-white">
+                <button className="btn-primary !px-4 !py-2 text-sm">
                   Viết đánh giá
                 </button>
               </form>
               <div className="mt-5 space-y-3">
                 {myReviews.map((r, i) => (
-                  <div key={i} className="rounded-xl bg-navy-800 border border-navy-700 p-3">
+                  <div key={i} className="vd-card-flat p-3">
                     <div className="flex items-center gap-2 text-sm">
                       <b>{r.name}</b>
                       <span className="text-amber-400">{"★".repeat(r.stars)}</span>
-                      <span className="text-slate-500">{r.date}</span>
+                      <span className="vd-muted2">{r.date}</span>
                     </div>
-                    <p className="text-sm text-slate-300 mt-1">{r.content}</p>
+                    <p className="text-sm  mt-1">{r.content}</p>
                   </div>
                 ))}
                 {myReviews.length === 0 && (
-                  <p className="text-sm text-slate-500">Chưa có đánh giá nào của bạn cho sản phẩm này.</p>
+                  <p className="text-sm vd-muted2">Chưa có đánh giá nào của bạn cho sản phẩm này.</p>
                 )}
               </div>
             </div>

@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { isSupabaseConfigured, useAuth } from "./providers";
 
 function strength(pw: string): { label: string; width: string; color: string } {
-  if (!pw) return { label: "", width: "0%", color: "bg-navy-600" };
+  if (!pw) return { label: "", width: "0%", color: "bg-slate-500" };
   const hasLetter = /[a-zA-Z]/.test(pw);
   const hasNumber = /[0-9]/.test(pw);
   if (pw.length < 8 || !hasLetter || !hasNumber)
@@ -44,17 +44,17 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-2xl bg-navy-800 border border-navy-600 p-6 shadow-card"
+        className="w-full max-w-md vd-card p-6 shadow-lift"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-xl font-bold">{mode === "login" ? "Đăng nhập" : "Tạo tài khoản mới"}</h2>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm vd-muted">
               {mode === "login" ? "Chào mừng bạn trở lại với VDigital" : "Mua nhanh hơn, xem lại đơn đã mua"}
             </p>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-navy-700" aria-label="Đóng">
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/10" aria-label="Đóng">
             <X size={20} />
           </button>
         </div>
@@ -72,7 +72,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
               onChange={(e) => setName(e.target.value)}
               placeholder="Họ tên"
               required
-              className="w-full rounded-lg bg-navy-900 border border-navy-600 px-3 py-2.5 text-sm"
+              className="field"
             />
           )}
           <input
@@ -81,7 +81,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
             onChange={(e) => setEmail(e.target.value)}
             placeholder="example@gmail.com"
             required
-            className="w-full rounded-lg bg-navy-900 border border-navy-600 px-3 py-2.5 text-sm"
+            className="field"
           />
           <input
             type="password"
@@ -89,20 +89,20 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Mật khẩu"
             required
-            className="w-full rounded-lg bg-navy-900 border border-navy-600 px-3 py-2.5 text-sm"
+            className="field"
           />
           {mode === "register" && password && (
             <div>
-              <div className="h-1.5 rounded-full bg-navy-700 overflow-hidden">
+              <div className="h-1.5 rounded-full vd-surface2 overflow-hidden">
                 <div className={`h-full ${s.color}`} style={{ width: s.width }} />
               </div>
-              <p className="text-xs text-slate-400 mt-1">{s.label}</p>
+              <p className="text-xs vd-muted mt-1">{s.label}</p>
             </div>
           )}
           {error && <p className="text-sm text-red-400">{error}</p>}
           <button
             disabled={busy}
-            className="w-full rounded-lg bg-brand-500 hover:bg-brand-600 py-2.5 font-semibold text-white disabled:opacity-50"
+            className="btn-primary w-full disabled:opacity-50"
           >
             {busy ? "Đang xử lý…" : mode === "login" ? "Đăng nhập" : "Tạo tài khoản"}
           </button>
@@ -111,7 +111,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
         <button
           onClick={() => auth.signInGoogle()}
           disabled={!isSupabaseConfigured}
-          className="mt-3 w-full rounded-lg border border-navy-600 bg-white text-slate-900 py-2.5 font-semibold text-sm disabled:opacity-40"
+          className="mt-3 w-full rounded-lg border vd-border bg-white text-slate-900 py-2.5 font-semibold text-sm disabled:opacity-40"
         >
           Đăng nhập bằng Google
         </button>
@@ -130,7 +130,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
             Vào demo bằng email trên
           </button>
         )}
-        <p className="mt-4 text-center text-sm text-slate-400">
+        <p className="mt-4 text-center text-sm vd-muted">
           {mode === "login" ? (
             <>
               Chưa có tài khoản?{" "}
@@ -147,7 +147,7 @@ export function AuthModal({ open, onClose }: { open: boolean; onClose: () => voi
             </>
           )}
         </p>
-        <p className="mt-2 text-center text-xs text-slate-500">
+        <p className="mt-2 text-center text-xs vd-muted2">
           Bằng việc đăng nhập, bạn đồng ý với Điều khoản sử dụng và Chính sách bảo mật.
         </p>
       </div>

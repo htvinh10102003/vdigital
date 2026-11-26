@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
-import { Header } from "@/components/Header";
-import { Footer } from "@/components/Footer";
+import { AppShell } from "@/components/AppShell";
+import { getCatalog } from "@/lib/store";
+
+const inter = Inter({ subsets: ["vietnamese", "latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
   title: "VDigital — Tài khoản bản quyền số & thẻ game giá tốt",
@@ -11,14 +14,17 @@ export const metadata: Metadata = {
   icons: { icon: "/favicon.svg" },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export const revalidate = 60;
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Catalog lấy phía server: trang chủ render sản phẩm ngay trong HTML đầu
+  // tiên, không còn "Đang tải sản phẩm…" 10–15s như bản cũ.
+  const catalog = await getCatalog();
   return (
-    <html lang="vi">
-      <body>
-        <Providers>
-          <Header />
-          <main className="min-h-[70vh]">{children}</main>
-          <Footer />
+    <html lang="vi" suppressHydrationWarning>
+      <body className={inter.variable}>
+        <Providers initialCatalog={catalog}>
+          <AppShell>{children}</AppShell>
         </Providers>
       </body>
     </html>

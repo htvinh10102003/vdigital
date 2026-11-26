@@ -18,19 +18,36 @@ function check(name, ok, extra = "") {
 async function main() {
   console.log(`VDigital flow tests — ${BASE}`);
 
-  // 1. Trang chủ
+  // 1. Trang chủ — sản phẩm phải có sẵn trong HTML đầu tiên (server render),
+  //    không được để client "Đang tải sản phẩm…" 10–15s.
   let res = await fetch(`${BASE}/`);
   let html = await res.text();
   check("home renders (200 + VDigital)", res.ok && html.includes("VDigital"));
+  check("home SSR: product names in initial HTML", html.includes("CapCut Pro") && html.includes("Canva Pro"), "CapCut/Canva missing from SSR HTML");
+  check("home SSR: no loading placeholder", !html.includes("Đang tải sản phẩm"));
+  // Thẻ game: mỗi hãng đúng 1 card trên trang chủ. Huy hiệu "Thẻ game · chọn
+  // mệnh giá" chỉ có 1/card (tên sản phẩm thì xuất hiện nhiều lần trong HTML
+  // vì cả ảnh fallback lẫn tiêu đề card đều có tên).
+  const gameBadgesHome = html.split("Thẻ game · chọn mệnh giá").length - 1;
+  check("home: exactly 2 game-card badges (Garena + Zing, 1 card each)", gameBadgesHome === 2, `got ${gameBadgesHome}`);
+  check("home: both game brands present", html.includes("Thẻ Garena") && html.includes("Thẻ Zing"));
 
   // 2. Danh sách sản phẩm
   res = await fetch(`${BASE}/san-pham`);
-  check("list /san-pham renders", res.ok && (await res.text()).includes("sản phẩm"));
+  const listHtml = await res.text();
+  check("list /san-pham renders", res.ok && listHtml.includes("sản phẩm"));
+  const gameBadgesList = listHtml.split("Thẻ game · chọn mệnh giá").length - 1;
+  check("list: exactly 2 game-card badges (Garena + Zing, 1 card each)", gameBadgesList === 2, `got ${gameBadgesList}`);
 
-  // 3. Chi tiết sản phẩm (CapCut Pro)
+  // 3. Chi tiết sản phẩm (CapCut Pro) — pill selector "Chọn gói" + giá theo gói
   res = await fetch(`${BASE}/tai-khoan-ban-quyen/capcut-pro`);
   html = await res.text();
   check("detail CapCut Pro renders", res.ok && html.includes("CapCut"));
+  check("detail: option pill group label", html.includes("Chọn gói"), "no 'Chọn gói' label in SSR HTML");
+  // 3b. Chi tiết thẻ Garena — pill mệnh giá + các mệnh giá có trong HTML
+  res = await fetch(`${BASE}/the-game/the-garena`);
+  const gaHtml = await res.text();
+  check("detail Garena renders with denomination pills", res.ok && gaHtml.includes("Chọn mệnh giá") && gaHtml.includes("20K") && gaHtml.includes("500K"), `got ${res.status}`);
 
   // 4. Catalog API
   res = await fetch(`${BASE}/api/catalog`);
@@ -82,12 +99,16 @@ async function main() {
     );
   }
 
-  // 9. Admin page renders (gate — SSR shows loading state, gate appears after hydration)
+  // 9. Admin settings API: chẩn đoán env (không cần auth? cần admin -> 403 khi chưa đăng nhập)
+  res = await fetch(`${BASE}/api/admin/settings`);
+  check("admin settings API without auth returns 403", res.status === 403, `got ${res.status}`);
+
+  // 10. Admin page renders (gate — SSR shows loading state, gate appears after hydration)
   res = await fetch(`${BASE}/admin`);
   const adminHtml = await res.text();
   check("admin page renders", res.ok && (adminHtml.includes("Quản trị") || adminHtml.includes("Đang kiểm tra quyền")), `got ${res.status}`);
 
-  // 10. Admin API không có quyền -> 403
+  // 11. Admin API không có quyền -> 403
   res = await fetch(`${BASE}/api/admin/orders`);
   check("admin API without auth returns 403", res.status === 403, `got ${res.status}`);
 
